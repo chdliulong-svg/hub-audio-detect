@@ -423,6 +423,7 @@ def detect_clipping_level(
 def detect_quiet_or_steady_noise(
     audio: np.ndarray,
     sr: int = 10000,
+    min_rms_thresh: float = 0.02,         # 极低 RMS 能量绝对底噪门限 (默认 0.02)
     peak_amp_thresh: float = 0.05,        # 极低能量绝对底噪门限 5.0% (实测基准最小撞击为 6.63%)
     peak_steady_thresh: float = 0.10,     # 稳态运转杂音峰值上限 10.0%
     kurtosis_steady_thresh: float = 3.8,  # 稳态高斯振动最大分段峭度门限 (高斯分布理论值为 3.0)
@@ -435,6 +436,7 @@ def detect_quiet_or_steady_noise(
     与物理峰值幅值，快速旁路无物理碰撞破坏性的稳态背景运转底噪与微弱单频机电杂音。
 
     判定准则：
+      0. 极低能量均方根底噪：RMS < min_rms_thresh (默认 0.02)，微弱动能完全不足以构成机械损伤，直接快速放行；
       1. 极低能量微弱底噪：整段音频最大绝对峰值 < peak_amp_thresh (5.0%)，物理动能不足以构成机械损伤，直接安全旁路；
       2. 稳态高斯连续运转杂音：整段音频峰值 < peak_steady_thresh (10.0%) 且最大分段峭度 < kurtosis_steady_thresh (3.8)，
          波形呈现标准高斯分布特征，无厚尾瞬态脉冲；
@@ -442,6 +444,7 @@ def detect_quiet_or_steady_noise(
 
     :param audio: 浮点音频数组 [-1.0, 1.0]
     :param sr: 采样率 (默认 10000 Hz)
+    :param min_rms_thresh: 极低 RMS 能量底噪门限 (默认 0.02)
     :param peak_amp_thresh: 极低能量绝对底噪门限 (默认 0.05 即 5.0%)
     :param peak_steady_thresh: 稳态杂音峰值门限 (默认 0.10 即 10.0%)
     :param kurtosis_steady_thresh: 稳态高斯峭度门限 (默认 3.8)
@@ -455,6 +458,11 @@ def detect_quiet_or_steady_noise(
     abs_a = np.abs(audio)
     peak_val = float(np.max(abs_a))
     peak_pct = peak_val * 100.0
+    rms_val = float(np.sqrt(np.mean(audio ** 2)))
+
+    # 准则 0: 极低能量均方根底噪 (RMS < min_rms_thresh，直接快速放行)
+    if min_rms_thresh > 0 and rms_val < min_rms_thresh:
+        return True, f"前置快速旁路: 极低静默底噪 (RMS {rms_val:.5f} < {min_rms_thresh:.4f})"
 
     # 准则 1: 极低能量微弱底噪 (物理动能极小，100% 安全旁路)
     if peak_val < peak_amp_thresh:
@@ -629,13 +637,13 @@ def detect_step_change_point(
     }
 
 
-def preprocess_audio_for_model(file_path_or_audio, target_sr: int = 10000):
+def preprocess_audio_for_model(file_path_or_audio, target_sr: int = 10000, min_rms_threshold: float = 0.02):
     """
     供全系统所有模型统一调用的标准前处理入口：
     1. 统一加载并规范化音频为 10kHz 单声道浮点数组 (自动多声道合并与高质量重采样)；
     2. 执行持续削顶与硬件故障方波拦截 (保留瞬态碰撞饱和，仅拦截死锁方波)；
     3. 执行工业级双向阶跃变点检测 (现场启动 / 现场停机 专属分类与拦截)；
-    4. 执行微弱底噪与稳态连续杂音前置快速旁路检测；
+    4. 执行微弱底噪 (RMS < min_rms_threshold) 与稳态连续杂音前置快速旁路检测；
     5. 综合输出 should_discard、is_quiet_normal、is_startup、is_shutdown、决策状态及清洗后音频。
 
     :return: (should_discard: bool, report: dict, audio: np.ndarray)
@@ -662,9 +670,11 @@ def preprocess_audio_for_model(file_path_or_audio, target_sr: int = 10000):
             elif step_report.get("type") == "SHUTDOWN_STEP_DOWN":
                 is_shutdown = True
 
-    # 3. 方案 A: 极低能量底噪与稳态杂音前置快速旁路检测 (若已判定硬件死锁舍弃则无需旁路)
+    # 3. 极低能量底噪与稳态杂音前置快速旁路检测 (含 RMS < min_rms_threshold)
     if not should_discard and not is_startup and not is_shutdown:
-        is_quiet_normal, quiet_msg = detect_quiet_or_steady_noise(audio, sr=orig_sr)
+        is_quiet_normal, quiet_msg = detect_quiet_or_steady_noise(
+            audio, sr=orig_sr, min_rms_thresh=min_rms_threshold
+        )
     else:
         is_quiet_normal, quiet_msg = False, "已检出硬件削顶或启停机工况"
 

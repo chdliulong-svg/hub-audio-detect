@@ -174,8 +174,10 @@ class TripleModelVoterEngine:
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
             }
             
-        # 1. 前处理与第一道硬件防线 (检测供电死锁与稳态底噪旁路)
-        should_discard, clip_rep, x_norm = self.preprocess_audio_for_model(file_path, target_sr=self.sr)
+        # 1. 前处理与全线信号学防线检验 (硬件死锁、启停机变点 CPD、极低 RMS 静音直通)
+        should_discard, clip_rep, x_norm = self.preprocess_audio_for_model(
+            file_path, target_sr=self.sr, min_rms_threshold=self.min_rms_thresh
+        )
         
         dur = len(x_norm) / self.sr if len(x_norm) > 0 else 0.0
         peak_val = float(np.max(np.abs(x_norm))) if len(x_norm) > 0 else 0.0
@@ -187,6 +189,8 @@ class TripleModelVoterEngine:
         clip_msg = clip_rep.get("message", "正常波形") if clip_rep else "正常波形"
         is_startup = bool(clip_rep.get("is_startup", False)) if clip_rep else False
         is_shutdown = bool(clip_rep.get("is_shutdown", False)) if clip_rep else False
+        is_quiet = bool(clip_rep.get("is_quiet_normal", False)) if clip_rep else False
+        quiet_msg = clip_rep.get("quiet_message", "") if clip_rep else ""
         step_rep = clip_rep.get("step_report", {}) if clip_rep else {}
         
         # 2. 生成试听 WAV (如果指定 output_dir)
@@ -305,8 +309,8 @@ class TripleModelVoterEngine:
                 result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
             return result
 
-        # 第三道防线前置放行: 极低能量静默底噪快速放行 (RMS < min_rms_thresh)
-        if self.min_rms_thresh > 0 and rms_val < self.min_rms_thresh:
+        # 第三道防线前置放行: 由 common 检测出的极低能量底噪与稳态杂音快速放行 (RMS < min_rms_thresh)
+        if is_quiet or (self.min_rms_thresh > 0 and rms_val < self.min_rms_thresh):
             infer_duration = round((time.time() - t_start) * 1000.0, 1)
             result = {
                 "success": True,
@@ -321,7 +325,7 @@ class TripleModelVoterEngine:
                 "is_shutdown": False,
                 "step_report": step_rep,
                 "rail_voltage": 0.0,
-                "clip_msg": f"极低静默底噪快速放行 (RMS {rms_val:.5f} < {self.min_rms_thresh:.4f})",
+                "clip_msg": quiet_msg or f"极低静默底噪快速放行 (RMS {rms_val:.5f} < {self.min_rms_thresh:.4f})",
                 "scores": {"03K": 0.0, "03U": 0.0, "03R": 0.0},
                 "alarms": {"03K": 0, "03U": 0, "03R": 0},
                 "alarm_votes": 0,
