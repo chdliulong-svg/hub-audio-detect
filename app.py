@@ -100,6 +100,12 @@ RECORDS_DIR = os.path.join(APP_DIR, "records")
 HISTORY_JSON = os.path.join(RECORDS_DIR, "history.json")
 SYSTEM_LOG_PATH = os.path.join(RECORDS_DIR, "system.log")
 
+# 工业级 SQLite 数据库与热备份配置
+from common.db_manager import DatabaseManager
+DB_CFG = CONFIG.get("database", {})
+DB_PATH = resolve_dir_path(DB_CFG.get("db_path", "records/history.db"), "records/history.db")
+db_mgr = DatabaseManager(DB_PATH)
+
 FIELD_RECORD_DIR = resolve_dir_path(CONFIG.get("field_record_dir", "incoming_audio"), "incoming_audio")
 raw_code_base = CONFIG.get("code_base_dir", "models_repo")
 CODE_BASE_DIR = resolve_dir_path(raw_code_base, "models_repo")
@@ -382,7 +388,7 @@ latest_result = None
 is_algorithm_running = True
 
 def save_history():
-    """保存历史记录至本地磁盘 (原子写入，杜绝外部并发读取冲突)"""
+    """保存历史记录镜像至本地磁盘 (原子写入，保证外部工具读取兼容)"""
     try:
         os.makedirs(os.path.dirname(HISTORY_JSON), exist_ok=True)
         tmp_path = HISTORY_JSON + ".tmp"
@@ -391,12 +397,12 @@ def save_history():
         if os.path.exists(tmp_path):
             os.replace(tmp_path, HISTORY_JSON)
     except Exception as e:
-        add_log("ERROR", f"保存历史记录失败: {e}")
+        add_log("ERROR", f"保存历史记录镜像失败: {e}")
 
 def sync_processed_files_to_history():
     """
     扫描 incoming_audio/processed 各分类子目录，补充磁盘存在但历史台账尚未收录的文件记录。
-    确保启动时全量对齐所有已处理的历史音频。
+    确保启动时全量对齐所有已处理的历史音频，并同步写入 SQLite 数据库。
     """
     global history_records
     DIR_TO_CONSENSUS = {
@@ -413,7 +419,7 @@ def sync_processed_files_to_history():
         return
 
     known_filenames = {r.get("filename") for r in history_records if "filename" in r}
-    added_count = 0
+    new_records = []
     
     for sub, meta in DIR_TO_CONSENSUS.items():
         sub_dir = os.path.join(PROCESSED_DIR, sub)
@@ -462,64 +468,64 @@ def sync_processed_files_to_history():
                     "plot_file": "",
                 }
                 format_review_info(syn_record)
-                history_records.append(syn_record)
+                new_records.append(syn_record)
                 known_filenames.add(item)
-                added_count += 1
         except Exception as e:
             add_log("WARN", f"扫描归档目录补充历史记录异常 ({sub}): {e}")
 
-    if added_count > 0:
+    if new_records:
+        # 批量写入 SQLite 数据库
+        db_mgr.batch_insert_records(new_records)
+        history_records.extend(new_records)
         history_records.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
         save_history()
-        add_log("INFO", f"已从本地 processed 归档目录自动补充已处理音频记录 {added_count} 条")
+        add_log("INFO", f"已从本地 processed 归档目录自动补充已处理音频并存入数据库: {len(new_records)} 条")
 
 def load_initial_history_records():
     """
     启动时自动加载历史处理记录：
-    1. 优先读取当前部署包 records/history.json；
-    2. 若本地无记录或为空，自动从母本历史记录目录回退并同步拷贝；
+    1. 优先读取 SQLite 数据库 records/history.db；
+    2. 若数据库为空，自动从本地 records/history.json 或母本归档无损迁移；
     3. 补充已处理归档子目录中可能未入库的历史音频；
-    4. 格式化复核字段与状态，全局生效。
+    4. 启动后台定时自动无锁热备份守护线程。
     """
     global history_records, latest_result
-    loaded = []
-
-    # 1. 尝试从本地 records/history.json 读取
-    if os.path.exists(HISTORY_JSON):
-        try:
-            with open(HISTORY_JSON, "r", encoding="utf-8") as f:
-                content = json.load(f)
-                if isinstance(content, list) and len(content) > 0:
-                    loaded = content
-        except Exception as e:
-            add_log("ERROR", f"读取本地历史记录失败: {e}")
-            loaded = []
-
-    # 2. 本地为空则自动尝试从候选备份源恢复
-    if not loaded:
-        fallback_candidates = [
-            r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records\history.json",
-            os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records", "history.json"),
-            os.path.join(os.path.dirname(BASE_DIR), "03_triple_model_realtime_monitor", "records", "history.json")
-        ]
-        for fb_path in fallback_candidates:
-            if os.path.exists(fb_path):
-                try:
-                    with open(fb_path, "r", encoding="utf-8") as f:
-                        fb_records = json.load(f)
-                        if isinstance(fb_records, list) and len(fb_records) > 0:
-                            loaded = fb_records
-                            add_log("INFO", f"已从历史母本归档成功恢复 {len(loaded)} 条诊断记录: {fb_path}")
-                            try:
-                                os.makedirs(os.path.dirname(HISTORY_JSON), exist_ok=True)
-                                shutil.copy2(fb_path, HISTORY_JSON)
-                            except Exception as copy_e:
-                                add_log("WARN", f"同步母本历史记录至本地失败: {copy_e}")
+    
+    # 1. 检查数据库中现有行数
+    db_count = db_mgr.get_records_count()
+    if db_count == 0:
+        # 尝试从本地 records/history.json 迁移
+        migrated = 0
+        if os.path.exists(HISTORY_JSON):
+            migrated = db_mgr.migrate_from_json(HISTORY_JSON, rename_backup=True)
+            if migrated > 0:
+                add_log("INFO", f"[💾 SQLite 引擎] 成功从本地 history.json 迁移 {migrated} 条历史记录至数据库")
+                
+        # 若仍为空，从母本路径探测恢复
+        if db_mgr.get_records_count() == 0:
+            fallback_candidates = [
+                r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records\history.db",
+                r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records\history.json",
+                os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records", "history.json"),
+                os.path.join(os.path.dirname(BASE_DIR), "03_triple_model_realtime_monitor", "records", "history.json")
+            ]
+            for fb_path in fallback_candidates:
+                if os.path.exists(fb_path):
+                    if fb_path.endswith(".db"):
+                        try:
+                            shutil.copy2(fb_path, db_mgr.db_path)
+                            add_log("INFO", f"[💾 SQLite 引擎] 成功从母本数据库恢复: {fb_path}")
                             break
-                except Exception as e:
-                    add_log("WARN", f"读取历史候选源失败 {fb_path}: {e}")
+                        except Exception:
+                            pass
+                    elif fb_path.endswith(".json"):
+                        migrated = db_mgr.migrate_from_json(fb_path, rename_backup=False)
+                        if migrated > 0:
+                            add_log("INFO", f"[💾 SQLite 引擎] 成功从母本 history.json 迁移恢复 {migrated} 条历史记录: {fb_path}")
+                            break
 
-    # 3. 标准化 review 字段与标签
+    # 2. 从数据库读取全量台账
+    loaded = db_mgr.get_all_records()
     for r in loaded:
         format_review_info(r)
         if r.get("consensus_level") == "HARDWARE_CLIPPING_DISCARD":
@@ -527,12 +533,22 @@ def load_initial_history_records():
 
     history_records = loaded
 
-    # 4. 同步 processed 归档目录中遗留的有效已处理音频
+    # 3. 同步 processed 归档目录中遗留的有效音频
     sync_processed_files_to_history()
 
     if history_records:
         latest_result = history_records[0]
-    add_log("INFO", f"历史诊断记录加载完成，系统就绪总数: {len(history_records)} 条")
+    add_log("INFO", f"[💾 SQLite 引擎] 历史诊断记录就绪，数据库总行数: {db_mgr.get_records_count()} 条")
+
+    # 4. 启动后台定时自动热备份守护线程
+    interval_hours = float(DB_CFG.get("backup_interval_hours", 24))
+    retention_days = int(DB_CFG.get("backup_retention_days", 30))
+    if DB_CFG.get("auto_backup", True):
+        db_mgr.start_auto_backup_worker(
+            interval_hours=interval_hours,
+            retention_days=retention_days,
+            log_callback=lambda msg: add_log("INFO", msg)
+        )
 
 # 启动时将 processed 根目录现存散落的文件按结果自动整理到分类子目录
 def organize_existing_processed_files():
@@ -563,7 +579,13 @@ def process_file_and_record(file_path):
             
             latest_result = res
             
-            # 去重：若历史中已存在同名记录，先移除旧记录，再将最新诊断结果插在首位递增
+            # 1. 事务持久化至 SQLite 数据库 (ACID 安全，断电不丢失)
+            try:
+                db_mgr.insert_or_replace_record(res)
+            except Exception as dbe:
+                add_log("ERROR", f"写入数据库异常: {dbe}")
+
+            # 2. 去重：若历史中已存在同名记录，先移除旧记录，再将最新诊断结果插在首位递增
             fn = res.get("filename")
             for i, old_r in enumerate(history_records):
                 if old_r.get("filename") == fn:
@@ -809,6 +831,10 @@ def api_records_review():
                 break
         
         if matched:
+            try:
+                db_mgr.update_review(fn, status, reviewer, now_str, notes)
+            except Exception as dbe:
+                add_log("ERROR", f"同步复核至数据库失败: {dbe}")
             save_history()
             if latest_result and latest_result.get("filename") == fn:
                 latest_result["review"] = matched["review"]
@@ -956,6 +982,10 @@ def api_admin_records_delete():
                 deleted = True
                 break
         if deleted:
+            try:
+                db_mgr.delete_record(fn)
+            except Exception as dbe:
+                add_log("ERROR", f"从数据库删除记录失败: {dbe}")
             save_history()
             if latest_result and latest_result.get("filename") == fn:
                 latest_result = history_records[0] if history_records else None
@@ -971,6 +1001,10 @@ def api_admin_records_clear_all():
         count = len(history_records)
         history_records = []
         latest_result = None
+        try:
+            db_mgr.clear_all_records()
+        except Exception as dbe:
+            add_log("ERROR", f"清空数据库失败: {dbe}")
         save_history()
     add_log("WARN", f"管理员执行了全量历史记录清空操作 (共清除 {count} 条记录)")
     return jsonify({"success": True, "msg": f"已成功清除全部 {count} 条历史诊断记录"})
@@ -1898,6 +1932,39 @@ def api_admin_toggle_autostart():
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": f"切换自启动状态失败: {e}"}), 500
+
+# ---------------------------------------------------------------------------
+# 数据库在线热备份与运维 REST API
+# ---------------------------------------------------------------------------
+@app.route("/api/admin/backups", methods=["GET"])
+def api_admin_backups():
+    """获取所有数据库备份清单与存储信息"""
+    backups = db_mgr.list_backups()
+    total_size_mb = round(sum(b["size_bytes"] for b in backups) / (1024 * 1024), 2)
+    return jsonify({
+        "success": True,
+        "total_backups": len(backups),
+        "total_size_mb": total_size_mb,
+        "backups": backups
+    })
+
+@app.route("/api/admin/backups/create", methods=["POST"])
+def api_admin_backups_create():
+    """手动触发立即执行 SQLite 在线热备份"""
+    retention_days = int(DB_CFG.get("backup_retention_days", 30))
+    ok, path, msg = db_mgr.backup_database(retention_days=retention_days)
+    if ok:
+        add_log("INFO", f"[💾 管理员触发] {msg}: {os.path.basename(path)}")
+        return jsonify({"success": True, "msg": msg, "backup_file": os.path.basename(path)})
+    else:
+        add_log("ERROR", f"[💾 管理员触发] {msg}")
+        return jsonify({"success": False, "error": msg}), 500
+
+@app.route("/api/admin/backups/download/<filename>", methods=["GET"])
+def api_admin_backups_download(filename):
+    """下载指定的历史数据库备份文件"""
+    backup_dir = os.path.join(RECORDS_DIR, "backups")
+    return send_from_directory(backup_dir, filename, as_attachment=True)
 
 # ---------------------------------------------------------------------------
 # 主程序入口

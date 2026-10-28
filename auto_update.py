@@ -49,6 +49,8 @@ def ensure_field_protections():
                 "config.json.bak*",
                 ".workbuddy/",
                 "records/history.json",
+                "records/history.db*",
+                "records/backups/*",
                 "records/*.wav",
                 "records/*.png",
                 "records/*.log",
