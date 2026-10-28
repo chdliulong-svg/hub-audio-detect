@@ -26,8 +26,8 @@
         <div class="header-right" style="gap:10px; align-items:center;">
             <div id="headerAlgoStatusBox" style="display:flex; align-items:center; gap:8px;">
                 <span class="status-pill status-ready" id="headerAlgoStatusBadge">● 算法检测运行中</span>
-                <button class="btn btn-danger btn-xs" id="btnHeaderStopAlgo" onclick="stopAlgorithmEngine()" title="立即暂停后台目录扫描与推理">⏹️ 停止算法</button>
-                <button class="btn btn-success btn-xs" id="btnHeaderStartAlgo" onclick="startAlgorithmEngine()" style="display:none;" title="恢复后台目录扫描与推理">▶️ 启动算法</button>
+                <button class="btn btn-danger btn-xs" id="btnHeaderStopAlgo" onclick="stopAlgorithmEngine()" title="立即暂停后台目录扫描与推理">⏹️ 暂停</button>
+                <button class="btn btn-success btn-xs" id="btnHeaderStartAlgo" onclick="startAlgorithmEngine()" style="display:none;" title="恢复后台目录扫描与推理">▶️ 启动</button>
             </div>
             <a href="/" class="btn btn-primary" style="text-decoration:none">
                 📊 返回实时大屏
@@ -561,25 +561,31 @@
                     <form id="configForm" onsubmit="saveSystemConfig(event)">
                         
                         <div class="form-group">
-                            <label for="cfgAlarmThresh">单模型严选告警置信度阈值 (%)</label>
+                            <label for="cfgAlarmThresh">告警置信度阈值 (%)</label>
                             <input type="number" id="cfgAlarmThresh" step="0.5" min="50" max="99.9" value="90.0" required>
-                            <span class="field-hint">核心策略准则：单模型必须超过此高置信度门限才能投出 1 票，阻断弱噪声</span>
+                            <span class="field-hint">单模型严选门限：模型置信度超过此值方可投出有效告警票</span>
                         </div>
 
                         <div class="form-group">
-                            <label for="cfgScanInterval">待测目录自动扫描周期 (秒)</label>
+                            <label for="cfgMinRmsThresh">静音直通门限 (RMS 能量)</label>
+                            <input type="number" id="cfgMinRmsThresh" step="0.005" min="0" max="0.2" value="0.02" required>
+                            <span class="field-hint">微弱底噪直接放行：RMS 小于此门限直接判定为正常，跳过模型推理</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cfgScanInterval">待测目录扫描周期 (秒)</label>
                             <input type="number" id="cfgScanInterval" step="0.5" min="0.5" max="30" value="1.0" required>
-                            <span class="field-hint">后台扫描 incoming_audio 发现新文件时的轮询时间间隔</span>
+                            <span class="field-hint">后台轮询待测音频目录的时间间隔</span>
                         </div>
 
                         <div class="form-group">
-                            <label for="cfgWatchDir">📁 实时待测检测路径 (监听音频目录)</label>
+                            <label for="cfgWatchDir">📁 待测音频监听路径</label>
                             <div style="display:flex; gap:8px;">
                                 <input type="text" id="cfgWatchDir" placeholder="例如: incoming_audio 或 D:\scada_recordings" required style="flex:1;">
                                 <button type="button" class="btn btn-outline btn-sm" onclick="resetDefaultWatchDir()" title="恢复默认 incoming_audio 目录">恢复默认</button>
                             </div>
                             <span class="field-hint">
-                                后台自动轮询扫描待测音频（.bin / .wav）的目录。支持<strong>相对路径</strong>（如 <code>incoming_audio</code>）或宿主机任意<strong>绝对盘符路径</strong>（如 <code>D:\WindTurbine\AudioData</code>）。修改后即刻生效，无需重启。
+                                后台自动轮询扫描待测音频（.bin / .wav）目录，支持相对路径或绝对盘符路径，修改后即刻生效。
                             </span>
                             <div id="cfgWatchDirResolved" style="font-size:11px; color:#2563eb; margin-top:3px; font-family:var(--font-mono);">
                                 当前实际物理路径: --
@@ -587,13 +593,13 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="cfgProcessedDir">🗄️ 处理完毕归档路径 (分析结果分类存储)</label>
+                            <label for="cfgProcessedDir">🗄️ 诊断结果归档路径</label>
                             <div style="display:flex; gap:8px;">
                                 <input type="text" id="cfgProcessedDir" placeholder="例如: incoming_audio/processed 或 D:\scada_recordings\archived" style="flex:1;">
                                 <button type="button" class="btn btn-outline btn-sm" onclick="resetDefaultProcessedDir()" title="跟随检测目录下的 processed 文件夹">默认归档</button>
                             </div>
                             <span class="field-hint">
-                                检测完成后的音频自动按 7 种诊断工况分类保存的目录。支持相对或绝对路径；留空则默认在待测目录中创建 <code>processed</code> 子目录。
+                                诊断完成后的音频自动按工况分类归档目录，留空默认在待测目录下创建 processed 子目录。
                             </span>
                             <div id="cfgProcessedDirResolved" style="font-size:11px; color:#64748b; margin-top:3px; font-family:var(--font-mono);">
                                 当前实际归档路径: --
@@ -692,19 +698,26 @@
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; align-items: center;">
-                            <button type="submit" class="btn btn-primary">
-                                💾 保存全部配置
+                        <div style="display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center;">
+                            <button type="submit" class="btn btn-primary" id="btnSaveConfig">
+                                💾 保存配置
                             </button>
                             <button type="button" class="btn btn-danger" onclick="stopAlgorithmEngine()" id="btnStopEngineForm">
-                                ⏹️ 停止算法检测
+                                ⏹️ 暂停检测
                             </button>
                             <button type="button" class="btn btn-success" onclick="startAlgorithmEngine()" id="btnStartEngineForm" style="display:none;">
-                                ▶️ 启动算法检测
+                                ▶️ 启动检测
                             </button>
                             <button type="button" class="btn btn-warning" onclick="restartAlgorithmEngine()" id="btnRestartEngine">
-                                🔄 重启算法引擎
+                                🔄 热重载引擎
                             </button>
+                            <button type="button" class="btn btn-outline" onclick="restartProcessCold()" id="btnRestartProcessForm">
+                                🔌 重启服务
+                            </button>
+                        </div>
+                        <div id="restartLoadingStatus" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: #fffbeb; border: 1px solid #fef3c7; color: #b45309; font-size: 12px; align-items: center; gap: 10px;">
+                            <span>⏳</span>
+                            <span id="restartLoadingText">正在重新加载算法模块与 3 大核心模型，重置常驻内存镜像，约需 8~12 秒，请稍候...</span>
                         </div>
                     </form>
                 </div>
@@ -747,71 +760,36 @@
                     </div>
                 </div>
 
-                <!-- Bottom: System Control & Algorithm Restart Card -->
-                <div class="config-form-card" style="grid-column: 1 / -1; margin-top: 6px;">
-                    <div class="card-head">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <h3>⚡ 算法引擎与检测系统运行控制</h3>
-                            <span class="status-pill status-ready" id="algoStatusBadgeBottom">● 算法检测运行中 (RUNNING)</span>
-                        </div>
-                        <span class="head-tip">实时停止/启动检测，或一键热重载 Python 算法、CPD 变点门禁及模型权重</span>
-                    </div>
-                    <div style="padding: 10px 0;">
-                        <p style="font-size: 13px; color: var(--text-sub); line-height: 1.6; margin-bottom: 12px;">
-                            <strong>【算法停止/启动】</strong>：点击“停止算法检测”可立即切断 incoming_audio 自动监听流与音频诊断，停止硬件 CPU/内存计算，避免占用被部署设备任何算力；随时可点击“启动算法检测”秒级恢复监测。<br>
-                            <strong>【算法热重载】</strong>：当更新了算法代码（如 CPD 变点检测、硬件削顶滤波准则）或微调模型权重后，点击“立即重启算法引擎”可<strong>免重启服务进程，快速热重载整个检测系统</strong>。
-                        </p>
-                        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-                            <button class="btn btn-danger" onclick="stopAlgorithmEngine()" id="btnStopEngineCard" style="padding: 8px 16px; font-size: 13px; font-weight: 700;">
-                                ⏹️ 停止算法检测 (暂停扫描与推理)
-                            </button>
-                            <button class="btn btn-success" onclick="startAlgorithmEngine()" id="btnStartEngineCard" style="display: none; padding: 8px 16px; font-size: 13px; font-weight: 700;">
-                                ▶️ 启动算法检测 (恢复实时流监测)
-                            </button>
-                            <button class="btn btn-warning" onclick="restartAlgorithmEngine()" id="btnRestartEngineMain" style="padding: 8px 16px; font-size: 13px; font-weight: 700;">
-                                🔄 立即重启算法引擎与检测系统 (热重载)
-                            </button>
-                            <button class="btn btn-outline" onclick="restartProcessCold()" id="btnRestartProcessMain" style="padding: 8px 14px; font-size: 12px;">
-                                🔌 完全重启服务进程 (冷重启)
-                            </button>
-                        </div>
-                        <div id="restartLoadingStatus" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: #fffbeb; border: 1px solid #fef3c7; color: #b45309; font-size: 12px; align-items: center; gap: 10px;">
-                            <span>⏳</span>
-                            <span id="restartLoadingText">正在重新加载算法模块与 3 大核心模型，重置常驻内存镜像，约需 8~12 秒，请稍候...</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Bottom 2: System Auto-Update & Version Maintenance Card -->
+                <!-- Bottom: System Auto-Update & Version Maintenance Card -->
                 <div class="config-form-card" style="grid-column: 1 / -1; margin-top: 14px; border-left: 3px solid #2563eb;">
                     <div class="card-head">
                         <div style="display:flex; align-items:center; gap:10px;">
-                            <h3>🔄 系统在线自动更新与版本维护</h3>
+                            <h3>🔄 在线更新与版本维护</h3>
                             <span class="status-pill status-ready" id="updateStatusBadge">● 检查就绪</span>
                         </div>
-                        <span class="head-tip">直连 GitHub 主线仓库 (hub-audio-detect) · 一键拉取最新代码/依赖/权重并平滑重启</span>
+                        <span class="head-tip">直连 GitHub 仓库 (hub-audio-detect) · 一键同步最新代码与平滑重启</span>
                     </div>
                     <div style="padding: 10px 0;">
                         <!-- Version Stats Grid -->
                         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px;">
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
-                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">当前本地部署版本 (Local HEAD)</span>
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">当前本地版本</span>
                                 <strong id="updateLocalSha" style="font-family:var(--font-mono); font-size:13.5px; color:var(--text-main);">检测中...</strong>
                                 <div id="updateLocalMsg" style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</div>
                             </div>
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
-                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">GitHub 远程主线版本 (Remote main)</span>
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">GitHub 远程版本</span>
                                 <strong id="updateRemoteSha" style="font-family:var(--font-mono); font-size:13.5px; color:#2563eb;">未检查</strong>
                                 <div id="updateRemoteMsg" style="font-size:11px; color:#64748b; margin-top:2px;">点击下方按钮联网检查</div>
                             </div>
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
-                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">部署机更新渠道支持</span>
-                                <span style="font-size:12px; color:#10b981; font-weight:600; display:block;">Web后台 / 批处理 / Windows计划任务</span>
-                                <div style="font-size:11px; color:#64748b; margin-top:2px;">支持夜间无人值守静默自动更新</div>
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">更新维护渠道</span>
+                                <span style="font-size:12px; color:#10b981; font-weight:600; display:block;">Web后台 / 批处理 / 计划任务</span>
+                                <div style="font-size:11px; color:#64748b; margin-top:2px;">支持无人值守静默自动更新</div>
                             </div>
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                    <span style="font-size:11.5px; color:var(--text-muted);">开机/重启自启动状态</span>
+                                    <span style="font-size:11.5px; color:var(--text-muted);">开机自启状态</span>
                                     <span class="status-pill" id="autostartStatusBadge" style="font-size:11px; padding:1px 6px;">检测中</span>
                                 </div>
                                 <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -820,7 +798,7 @@
                                         ⚙️ 切换
                                     </button>
                                 </div>
-                                <div style="font-size:10.5px; color:#64748b; margin-top:2px;">启动文件夹 + 计划任务全自动就绪</div>
+                                <div style="font-size:10.5px; color:#64748b; margin-top:2px;">开机自动静默后台启动</div>
                             </div>
                         </div>
 
@@ -831,22 +809,22 @@
                         <!-- Update in progress banner -->
                         <div id="updateProgressBox" style="display:none; margin-bottom:14px; padding:12px 14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:12.5px; color:#1e40af; align-items:center; gap:10px;">
                             <span>🚀</span>
-                            <span id="updateProgressText">升级进程已在后台独立启动，正在拉取最新代码、检查依赖环境并重启服务，页面将在 25 秒后自动刷新...</span>
+                            <span id="updateProgressText">升级进程已在后台独立启动，正在拉取最新代码并重启服务，页面将在 25 秒后自动刷新...</span>
                         </div>
 
                         <!-- Control Buttons -->
-                        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
                             <button type="button" class="btn btn-outline" onclick="checkSystemUpdate()" id="btnCheckUpdate" style="padding:8px 16px; font-size:13px; font-weight:600;">
-                                🔍 检查远程最新版本
+                                🔍 检查更新
                             </button>
                             <button type="button" class="btn btn-primary" onclick="applySystemUpdate()" id="btnApplyUpdate" style="padding:8px 18px; font-size:13px; font-weight:700;">
-                                🚀 立即在线升级并热重启
+                                🚀 在线升级
                             </button>
                             <button type="button" class="btn btn-outline" onclick="toggleWebAutostart()" id="btnAutostartMain" style="padding:8px 16px; font-size:13px; font-weight:600;">
-                                ⚙️ 切换开机自启动
+                                ⚙️ 开机自启
                             </button>
                             <span style="font-size:11.5px; color:var(--text-muted); margin-left:4px;">
-                                提示：亦可双击 <code>6_开启开机自启动.bat</code> 或 <code>5_一键在线更新系统.bat</code>。
+                                提示：亦可在部署机双击 <code>5_一键在线更新系统.bat</code> 或 <code>6_开启开机自启动.bat</code>
                             </span>
                         </div>
                     </div>

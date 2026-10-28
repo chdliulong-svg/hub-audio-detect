@@ -45,7 +45,7 @@ def _init_cjk_fonts():
 _init_cjk_fonts()
 
 class TripleModelVoterEngine:
-    def __init__(self, code_base_dir=None, device=None, alarm_thresh_pct=90.0):
+    def __init__(self, code_base_dir=None, device=None, alarm_thresh_pct=90.0, min_rms_threshold=0.02):
         # 智能路径解析：如果未指定或指定路径不存在，自动在本地相对目录中查找模型仓库
         this_dir = os.path.dirname(os.path.abspath(__file__))
         app_root = os.path.dirname(this_dir)
@@ -74,6 +74,7 @@ class TripleModelVoterEngine:
         self.code_base_dir = resolved_dir or code_base_dir or r"P:\01-work\022-audio detect"
         self.device = device or torch.device("cpu")
         self.alarm_thresh_pct = float(alarm_thresh_pct)
+        self.min_rms_thresh = float(min_rms_threshold)
         self.sr = 10000
         
         # 确保 common 在 sys.path (优先当前项目根目录及自身上级目录下的 common)
@@ -303,6 +304,39 @@ class TripleModelVoterEngine:
             if generate_plot and output_dir:
                 result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
             return result
+
+        # 第三道防线前置放行: 极低能量静默底噪快速放行 (RMS < min_rms_thresh)
+        if self.min_rms_thresh > 0 and rms_val < self.min_rms_thresh:
+            infer_duration = round((time.time() - t_start) * 1000.0, 1)
+            result = {
+                "success": True,
+                "filename": fn,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "duration_sec": round(dur, 2),
+                "peak_amplitude": round(peak_val, 4),
+                "rms_amplitude": round(rms_val, 5),
+                "crest_factor": round(crest_val, 2),
+                "is_clipped": False,
+                "is_startup": False,
+                "is_shutdown": False,
+                "step_report": step_rep,
+                "rail_voltage": 0.0,
+                "clip_msg": f"极低静默底噪快速放行 (RMS {rms_val:.5f} < {self.min_rms_thresh:.4f})",
+                "scores": {"03K": 0.0, "03U": 0.0, "03R": 0.0},
+                "alarms": {"03K": 0, "03U": 0, "03R": 0},
+                "alarm_votes": 0,
+                "mean_confidence_pct": 0.0,
+                "consensus_level": "NORMAL_CLEAN_NOISE",
+                "consensus_title": f"【正常底噪】极低微弱底噪直接放行 (RMS: {rms_val:.4f} < {self.min_rms_thresh:.4f})",
+                "consensus_badge": "badge-normal",
+                "is_alarm": False,
+                "infer_ms": infer_duration,
+                "wav_file": wav_rel_path,
+                "plot_file": ""
+            }
+            if generate_plot and output_dir:
+                result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+            return result
             
         # 3. 执行 3 模型切片推理 (2.0s 窗长 + 1.0s 步长 + 85/15 软加权聚合)
         scores = {}
@@ -460,3 +494,5 @@ class TripleModelVoterEngine:
         plt.close(fig)
         
         return plot_name
+
+    predict_audio_file = analyze_audio_file

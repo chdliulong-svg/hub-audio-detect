@@ -364,9 +364,11 @@ add_log("INFO", f"系统配置载入: 监听目录={WATCH_DIR}, 单模型阈值=
 from models.voter import TripleModelVoterEngine
 
 # 初始化模型单例
+MIN_RMS_THRESH = float(MONITOR_CFG.get("min_rms_threshold", 0.02))
 engine = TripleModelVoterEngine(
     code_base_dir=CODE_BASE_DIR,
-    alarm_thresh_pct=ALARM_THRESH_PCT
+    alarm_thresh_pct=ALARM_THRESH_PCT,
+    min_rms_threshold=MIN_RMS_THRESH
 )
 add_log("INFO", "3 核心黄金铁三角模型 (03K Dasheng + 03U ECHOv2 + 03R GRAM-Mono) 载入完成，门禁仲裁就绪")
 
@@ -1482,6 +1484,7 @@ def api_admin_system_status():
                 "processed_dir": MONITOR_CFG.get("processed_dir", "incoming_audio/processed"),
                 "processed_dir_abs": PROCESSED_DIR,
                 "alarm_threshold_pct": engine.alarm_thresh_pct,
+                "min_rms_threshold": getattr(engine, "min_rms_thresh", 0.02),
                 "scan_interval_sec": MONITOR_CFG.get("scan_interval_sec", 1.0),
                 "resource_limit": RESOURCE_LIMIT_INFO
             }
@@ -1497,12 +1500,17 @@ def api_admin_update_config():
     try:
         new_thresh = float(data.get("alarm_threshold_pct", engine.alarm_thresh_pct))
         new_interval = float(data.get("scan_interval_sec", MONITOR_CFG.get("scan_interval_sec", 1.0)))
+        new_min_rms = float(data.get("min_rms_threshold", getattr(engine, "min_rms_thresh", 0.02)))
+        new_min_rms = max(0.0, min(0.5, new_min_rms))
 
         engine.alarm_thresh_pct = new_thresh
+        engine.min_rms_thresh = new_min_rms
         CONFIG["monitor"]["alarm_threshold_pct"] = new_thresh
         CONFIG["monitor"]["scan_interval_sec"] = new_interval
+        CONFIG["monitor"]["min_rms_threshold"] = new_min_rms
         MONITOR_CFG["alarm_threshold_pct"] = new_thresh
         MONITOR_CFG["scan_interval_sec"] = new_interval
+        MONITOR_CFG["min_rms_threshold"] = new_min_rms
 
         # 1. 待测音频监听检测路径热更新
         if "watch_dir" in data and str(data["watch_dir"]).strip():
@@ -1552,7 +1560,7 @@ def api_admin_update_config():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(CONFIG, f, ensure_ascii=False, indent=2)
 
-        add_log("INFO", f"管理员更新了系统配置: 待测监听路径={WATCH_DIR}, 归档路径={PROCESSED_DIR}, 单模型阈值={new_thresh}%, 扫描周期={new_interval}s")
+        add_log("INFO", f"管理员更新了系统配置: 待测监听路径={WATCH_DIR}, 归档路径={PROCESSED_DIR}, 单模型阈值={new_thresh}%, 静音门限={new_min_rms}, 扫描周期={new_interval}s")
         return jsonify({
             "success": True,
             "msg": "系统配置已成功保存！待测检测路径与系统参数已即时热生效。",
@@ -1591,7 +1599,8 @@ def api_admin_restart_engine():
             # 3. 重新实例化 3 核心黄金铁三角仲裁引擎 (03K + 03U + 03R + CPD)
             engine = mv.TripleModelVoterEngine(
                 code_base_dir=CODE_BASE_DIR,
-                alarm_thresh_pct=float(CONFIG.get("monitor", {}).get("alarm_threshold_pct", 90.0))
+                alarm_thresh_pct=float(CONFIG.get("monitor", {}).get("alarm_threshold_pct", 90.0)),
+                min_rms_threshold=float(CONFIG.get("monitor", {}).get("min_rms_threshold", 0.02))
             )
             is_algorithm_running = True
             

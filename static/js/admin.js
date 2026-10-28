@@ -752,9 +752,12 @@ async function fetchSystemStatus() {
 
             // 填充常规表单默认值 (仅当输入框未处于编辑聚焦状态时)
             const activeId = document.activeElement ? document.activeElement.id : '';
-            if (activeId !== 'cfgAlarmThresh' && activeId !== 'cfgScanInterval') {
+            if (activeId !== 'cfgAlarmThresh' && activeId !== 'cfgScanInterval' && activeId !== 'cfgMinRmsThresh') {
                 document.getElementById('cfgAlarmThresh').value = s.alarm_threshold_pct;
                 document.getElementById('cfgScanInterval').value = s.scan_interval_sec;
+                if (document.getElementById('cfgMinRmsThresh')) {
+                    document.getElementById('cfgMinRmsThresh').value = s.min_rms_threshold !== undefined ? s.min_rms_threshold : 0.02;
+                }
             }
             if (activeId !== 'cfgWatchDir') {
                 document.getElementById('cfgWatchDir').value = s.watch_dir || 'incoming_audio';
@@ -778,6 +781,7 @@ async function saveSystemConfig(e) {
     e.preventDefault();
     const alarmThresh = parseFloat(document.getElementById('cfgAlarmThresh').value);
     const scanInterval = parseFloat(document.getElementById('cfgScanInterval').value);
+    const minRmsThresh = parseFloat(document.getElementById('cfgMinRmsThresh') ? document.getElementById('cfgMinRmsThresh').value : 0.02);
     const watchDir = document.getElementById('cfgWatchDir') ? document.getElementById('cfgWatchDir').value.trim() : 'incoming_audio';
     const processedDir = document.getElementById('cfgProcessedDir') ? document.getElementById('cfgProcessedDir').value.trim() : '';
     const resEnable = document.getElementById('cfgResourceLimitEnable') ? document.getElementById('cfgResourceLimitEnable').checked : true;
@@ -792,6 +796,7 @@ async function saveSystemConfig(e) {
             body: JSON.stringify({
                 alarm_threshold_pct: alarmThresh,
                 scan_interval_sec: scanInterval,
+                min_rms_threshold: minRmsThresh,
                 watch_dir: watchDir,
                 processed_dir: processedDir,
                 resource_limit_enable: resEnable,
@@ -858,9 +863,9 @@ async function restartAlgorithmEngine() {
     } catch (err) {
         alert('请求异常: ' + err);
     } finally {
-        if (btn) { btn.disabled = false; btn.innerText = '🔄 重启算法系统'; }
-        if (btnMain) { btnMain.disabled = false; btnMain.innerText = '🔄 重启算法引擎与检测系统'; }
-        if (btnCard) { btnCard.disabled = false; btnCard.innerText = '🔄 立即重启算法引擎与检测系统 (热重载)'; }
+        if (btn) { btn.disabled = false; btn.innerText = '🔄 重启算法'; }
+        if (btnMain) { btnMain.disabled = false; btnMain.innerText = '🔄 热重载引擎'; }
+        if (btnCard) { btnCard.disabled = false; btnCard.innerText = '🔄 热重载引擎'; }
         if (loadingBox) { loadingBox.style.display = 'none'; }
     }
 }
@@ -957,7 +962,7 @@ async function checkSystemUpdate(isSilent = false) {
                 if (btnApply) {
                     btnApply.disabled = false;
                     btnApply.style.opacity = '1';
-                    btnApply.innerText = '🚀 立即在线升级并热重启';
+                    btnApply.innerText = '🚀 在线升级';
                 }
             } else {
                 if (badge) {
@@ -973,7 +978,7 @@ async function checkSystemUpdate(isSilent = false) {
                 if (btnApply) {
                     btnApply.disabled = true;
                     btnApply.style.opacity = '0.6';
-                    btnApply.innerText = '✅ 当前已是最新版本';
+                    btnApply.innerText = '✅ 已是最新版本';
                 }
             }
         } else {
@@ -992,7 +997,7 @@ async function checkSystemUpdate(isSilent = false) {
         isCheckingUpdate = false;
         if (btn) {
             btn.disabled = false;
-            btn.innerText = '🔍 检查远程最新版本';
+            btn.innerText = '🔍 检查更新';
         }
     }
 }
@@ -1007,7 +1012,7 @@ async function applySystemUpdate() {
     const progressBox = document.getElementById('updateProgressBox');
     const progressText = document.getElementById('updateProgressText');
 
-    if (btnApply) { btnApply.disabled = true; btnApply.innerText = '⏳ 正在触发在线升级...'; }
+    if (btnApply) { btnApply.disabled = true; btnApply.innerText = '⏳ 正在升级...'; }
     if (btnCheck) { btnCheck.disabled = true; }
     if (progressBox) { progressBox.style.display = 'flex'; }
 
@@ -1031,7 +1036,7 @@ async function applySystemUpdate() {
             }, 1000);
         } else {
             alert('❌ 触发更新失败: ' + (json.error || '未知错误'));
-            if (btnApply) { btnApply.disabled = false; btnApply.innerText = '🚀 立即在线升级并热重启'; }
+            if (btnApply) { btnApply.disabled = false; btnApply.innerText = '🚀 在线升级'; }
             if (btnCheck) { btnCheck.disabled = false; }
             if (progressBox) { progressBox.style.display = 'none'; }
         }
@@ -1079,7 +1084,7 @@ async function fetchAutostartStatus() {
                 }
                 if (btn) btn.innerText = '关闭';
                 if (btnMain) {
-                    btnMain.innerText = '🛑 取消开机自启动';
+                    btnMain.innerText = '🛑 关闭自启';
                 }
             } else {
                 if (badge) {
@@ -1094,7 +1099,7 @@ async function fetchAutostartStatus() {
                 }
                 if (btn) btn.innerText = '开启';
                 if (btnMain) {
-                    btnMain.innerText = '🚀 开启开机自启动';
+                    btnMain.innerText = '⚙️ 开机自启';
                 }
             }
         }

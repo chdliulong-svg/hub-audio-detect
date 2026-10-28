@@ -7,6 +7,7 @@
     "watch_dir": "incoming_audio",
     "scan_interval_sec": 1.0,
     "alarm_threshold_pct": 90.0,
+    "min_rms_threshold": 0.02,
     "voting_mode": "STRICT_MAJORITY",
     "min_majority_mean_pct": 85.0,
     "auto_archive": false
