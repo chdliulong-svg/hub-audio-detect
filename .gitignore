@@ -24,6 +24,9 @@ Thumbs.db
 
 # Runtime Logs & Dynamic Processed Buffers
 records/*.log
+records/history.json
+records/*.wav
+records/*.png
 *.log
 incoming_audio/processed/*
 !incoming_audio/processed/.gitkeep

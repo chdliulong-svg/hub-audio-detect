@@ -266,6 +266,41 @@
                         <canvas id="chartPhysicsCanvas"></canvas>
                     </div>
                 </div>
+
+                <!-- Chart 7: 音频有效值 (RMS) 能级梯度分布直方图 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">📊</span>
+                            <strong>有效值 (RMS) 振动能量梯度分布直方图</strong>
+                            <span class="chart-subtitle">全量声学切片在各有效值能量区间的频数分布与占比梯度</span>
+                        </div>
+                    </div>
+                    <div class="rms-mini-stats-bar" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:11.5px; padding:6px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                        <span>中位数: <strong id="rmsStatMedian" style="font-family:var(--font-mono); color:#2563eb;">--</strong></span>
+                        <span>均值: <strong id="rmsStatAvg" style="font-family:var(--font-mono);">--</strong></span>
+                        <span>P95高能位: <strong id="rmsStatP95" style="font-family:var(--font-mono); color:#dc2626;">--</strong></span>
+                        <span>标准差: <strong id="rmsStatStd" style="font-family:var(--font-mono);">--</strong></span>
+                        <span>动态范围: <strong id="rmsStatRange" style="font-family:var(--font-mono); color:#64748b;">--</strong></span>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 250px;">
+                        <canvas id="chartRmsDistCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 8: 七大工况有效值 (RMS) 能量对比 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">⚡</span>
+                            <strong>七大工况有效值 (RMS) 平均能级与波动区间</strong>
+                            <span class="chart-subtitle">对比正常底噪、启停变点、结构碰撞与硬件削顶的振动能量分级</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 295px;">
+                        <canvas id="chartRmsCategoryCanvas"></canvas>
+                    </div>
+                </div>
             </div>
 
             <!-- Multi-Dimensional Aggregation Summary Matrix Table -->

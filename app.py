@@ -1156,6 +1156,87 @@ def api_admin_analytics():
                 "ts": r.get("timestamp", "")
             })
 
+    # 7.5 声学有效值 (RMS) 能级分布与各工况统计
+    all_rmss = [float(p["record"].get("rms_amplitude", 0.0)) for p in filtered if "rms_amplitude" in p["record"]]
+    all_rmss_sorted = sorted(all_rmss)
+    total_rms_count = len(all_rmss_sorted)
+
+    def calc_percentile(sorted_list, pct):
+        if not sorted_list:
+            return 0.0
+        k = (len(sorted_list) - 1) * (pct / 100.0)
+        f = int(k)
+        c = f + 1
+        if c < len(sorted_list):
+            return sorted_list[f] + (k - f) * (sorted_list[c] - sorted_list[f])
+        return sorted_list[f]
+
+    min_rms = all_rmss_sorted[0] if all_rmss_sorted else 0.0
+    max_rms = all_rmss_sorted[-1] if all_rmss_sorted else 0.0
+    avg_rms = sum(all_rmss_sorted) / total_rms_count if total_rms_count else 0.0
+    median_rms = calc_percentile(all_rmss_sorted, 50)
+    p25_rms = calc_percentile(all_rmss_sorted, 25)
+    p75_rms = calc_percentile(all_rmss_sorted, 75)
+    p95_rms = calc_percentile(all_rmss_sorted, 95)
+    variance = sum((x - avg_rms) ** 2 for x in all_rmss_sorted) / total_rms_count if total_rms_count else 0.0
+    std_rms = variance ** 0.5
+
+    rms_kpis = {
+        "min": round(min_rms, 5),
+        "max": round(max_rms, 4),
+        "avg": round(avg_rms, 5),
+        "median": round(median_rms, 5),
+        "p25": round(p25_rms, 5),
+        "p75": round(p75_rms, 5),
+        "p95": round(p95_rms, 5),
+        "std": round(std_rms, 5)
+    }
+
+    rms_bins = [
+        {"min": 0.0,   "max": 0.02, "label": "< 0.02",    "name": "极微弱静默底噪", "color": "#0ea5e9"},
+        {"min": 0.02,  "max": 0.05, "label": "0.02-0.05", "name": "轻载平稳底噪", "color": "#10b981"},
+        {"min": 0.05,  "max": 0.10, "label": "0.05-0.10", "name": "稳态中载风噪", "color": "#84cc16"},
+        {"min": 0.10,  "max": 0.15, "label": "0.10-0.15", "name": "强气流与风剪", "color": "#eab308"},
+        {"min": 0.15,  "max": 0.20, "label": "0.15-0.20", "name": "高能态工况变点", "color": "#f97316"},
+        {"min": 0.20,  "max": 0.30, "label": "0.20-0.30", "name": "异常振动/冲击", "color": "#ef4444"},
+        {"min": 0.30,  "max": 0.45, "label": "0.30-0.45", "name": "剧烈碰擦/高能量", "color": "#dc2626"},
+        {"min": 0.45,  "max": 99.0, "label": "≥ 0.45",    "name": "供电轨饱和截幅", "color": "#8b5cf6"}
+    ]
+
+    rms_histogram = []
+    for b in rms_bins:
+        sub = [p for p in filtered if b["min"] <= float(p["record"].get("rms_amplitude", 0.0)) < b["max"]]
+        cnt = len(sub)
+        pct = round(cnt / total_matched * 100, 2) if total_matched else 0.0
+        rms_histogram.append({
+            "label": b["label"],
+            "tier_name": b["name"],
+            "count": cnt,
+            "pct": pct,
+            "color": b["color"]
+        })
+
+    rms_category_stats = []
+    for c_cfg in ANALYTICS_CATEGORIES:
+        k = c_cfg["key"]
+        sub_rmss = sorted([float(p["record"].get("rms_amplitude", 0.0)) for p in filtered if p["cat"] == k])
+        sub_cnt = len(sub_rmss)
+        c_avg = round(sum(sub_rmss) / sub_cnt, 5) if sub_cnt else 0.0
+        c_p95 = round(calc_percentile(sub_rmss, 95), 5) if sub_cnt else 0.0
+        c_median = round(calc_percentile(sub_rmss, 50), 5) if sub_cnt else 0.0
+        c_max = round(sub_rmss[-1], 4) if sub_rmss else 0.0
+        rms_category_stats.append({
+            "key": k,
+            "name": c_cfg["short_name"],
+            "full_name": c_cfg["name"],
+            "color": c_cfg["color"],
+            "count": sub_cnt,
+            "avg_rms": c_avg,
+            "median_rms": c_median,
+            "p95_rms": c_p95,
+            "max_rms": c_max
+        })
+
     # 8. 汇总矩阵报表 (Table Summary)
     table_summary = []
     for c_cfg in ANALYTICS_CATEGORIES:
@@ -1217,6 +1298,11 @@ def api_admin_analytics():
         "models": models_chart,
         "reviews": reviews_chart,
         "physics": sampled_points,
+        "rms_analytics": {
+            "kpis": rms_kpis,
+            "histogram": rms_histogram,
+            "by_category": rms_category_stats
+        },
         "table_summary": table_summary
     })
 
@@ -1277,6 +1363,25 @@ def api_admin_analytics_export_csv():
         for ds in ds_list:
             line.append(ds["data"][i] if i < len(ds["data"]) else 0)
         writer.writerow(line)
+
+    # 3. RMS 能级梯度直方图分布
+    rms_analytics = data.get("rms_analytics", {})
+    rms_hist = rms_analytics.get("histogram", [])
+    if rms_hist:
+        writer.writerow([])
+        writer.writerow(["--- 3. 声学有效值 (RMS) 能级梯度分布统计 ---"])
+        writer.writerow(["有效值能级区间", "工况特征代表", "样本数量", "占比(%)"])
+        for h in rms_hist:
+            writer.writerow([h.get("label"), h.get("tier_name"), h.get("count"), f"{h.get('pct')}%"])
+
+    # 4. 各工况 RMS 能量统计对比
+    rms_cat = rms_analytics.get("by_category", [])
+    if rms_cat:
+        writer.writerow([])
+        writer.writerow(["--- 4. 七大工况有效值 (RMS) 振动能级对比 ---"])
+        writer.writerow(["工况类别", "样本数量", "平均RMS", "中位数RMS", "P95高能位RMS", "最大RMS"])
+        for c in rms_cat:
+            writer.writerow([c.get("full_name"), c.get("count"), f"{c.get('avg_rms'):.5f}", f"{c.get('median_rms'):.5f}", f"{c.get('p95_rms'):.5f}", f"{c.get('max_rms'):.4f}"])
 
     csv_data = output.getvalue()
     filename = f"analytics_report_{filters.get('start_date')}_{filters.get('end_date')}.csv"

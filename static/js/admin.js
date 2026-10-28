@@ -1142,6 +1142,8 @@ let chartHourlyInstance = null;
 let chartModelsInstance = null;
 let chartReviewsInstance = null;
 let chartPhysicsInstance = null;
+let chartRmsDistInstance = null;
+let chartRmsCategoryInstance = null;
 
 const CHART_DEFAULTS = {
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -1204,13 +1206,15 @@ async function loadAnalyticsData() {
         // 2. 渲染 6 大 KPI 卡片
         renderAnalyticsKPIs(data.kpis || {});
 
-        // 3. 渲染 6 大 Chart.js 图表
+        // 3. 渲染 Chart.js 图表
         renderTrendChart(data.trend || {});
         renderTypesChart(data.types || {});
         renderHourlyChart(data.hourly || {});
         renderModelsChart(data.models || {});
         renderReviewsChart(data.reviews || {});
         renderPhysicsChart(data.physics || []);
+        renderRmsDistChart(data.rms_analytics || {});
+        renderRmsCategoryChart(data.rms_analytics || {});
 
         // 4. 渲染多维综合汇总表格
         renderMatrixTable(data.table_summary || [], filters.total_matched || 0);
@@ -1633,6 +1637,167 @@ function renderPhysicsChart(physicsPoints) {
                     title: { display: true, text: '峰值幅值 Peak (瞬态冲击)', color: CHART_DEFAULTS.tickColor, font: { size: 11, weight: 'bold' } },
                     grid: { color: CHART_DEFAULTS.gridColor },
                     ticks: { color: CHART_DEFAULTS.tickColor, font: { family: 'JetBrains Mono', size: 10 } }
+                }
+            }
+        }
+    });
+}
+
+function renderRmsDistChart(rmsAnalytics) {
+    const canvas = document.getElementById('chartRmsDistCanvas');
+    if (!canvas || !window.Chart) return;
+
+    if (chartRmsDistInstance) {
+        chartRmsDistInstance.destroy();
+        chartRmsDistInstance = null;
+    }
+
+    const kpis = rmsAnalytics.kpis || {};
+    const hist = rmsAnalytics.histogram || [];
+
+    const setTxt = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = val;
+    };
+    setTxt('rmsStatMedian', kpis.median !== undefined ? kpis.median : '--');
+    setTxt('rmsStatAvg', kpis.avg !== undefined ? kpis.avg : '--');
+    setTxt('rmsStatP95', kpis.p95 !== undefined ? kpis.p95 : '--');
+    setTxt('rmsStatStd', kpis.std !== undefined ? kpis.std : '--');
+    setTxt('rmsStatRange', (kpis.min !== undefined && kpis.max !== undefined) ? `${kpis.min} ~ ${kpis.max}` : '--');
+
+    const labels = hist.map(h => `${h.label} (${h.tier_name})`);
+    const counts = hist.map(h => h.count);
+    const colors = hist.map(h => h.color);
+
+    const ctx = canvas.getContext('2d');
+    chartRmsDistInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '音频切片样本数',
+                data: counts,
+                backgroundColor: colors,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    padding: 10,
+                    cornerRadius: 6,
+                    callbacks: {
+                        label: function(context) {
+                            const item = hist[context.dataIndex] || {};
+                            return `样本数量: ${item.count || 0} 份 (占比 ${item.pct || 0}%)`;
+                        },
+                        afterLabel: function(context) {
+                            const item = hist[context.dataIndex] || {};
+                            return `工况特征: ${item.tier_name || ''}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: CHART_DEFAULTS.gridColor },
+                    ticks: {
+                        color: CHART_DEFAULTS.tickColor,
+                        font: { size: 10, family: CHART_DEFAULTS.fontFamily },
+                        maxRotation: 35,
+                        minRotation: 20
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_DEFAULTS.gridColor },
+                    ticks: {
+                        color: CHART_DEFAULTS.tickColor,
+                        font: { size: 11 },
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderRmsCategoryChart(rmsAnalytics) {
+    const canvas = document.getElementById('chartRmsCategoryCanvas');
+    if (!canvas || !window.Chart) return;
+
+    if (chartRmsCategoryInstance) {
+        chartRmsCategoryInstance.destroy();
+        chartRmsCategoryInstance = null;
+    }
+
+    const byCat = rmsAnalytics.by_category || [];
+    const labels = byCat.map(c => c.name || c.full_name);
+    const avgData = byCat.map(c => c.avg_rms);
+    const p95Data = byCat.map(c => c.p95_rms);
+
+    const ctx = canvas.getContext('2d');
+    chartRmsCategoryInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '平均有效值 (Mean RMS)',
+                    data: avgData,
+                    backgroundColor: 'rgba(37, 99, 235, 0.85)',
+                    borderRadius: 4
+                },
+                {
+                    label: 'P95 高能阈值 (95th% RMS)',
+                    data: p95Data,
+                    backgroundColor: 'rgba(220, 38, 38, 0.85)',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { boxWidth: 12, padding: 10, font: { size: 11 } }
+                },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    padding: 10,
+                    cornerRadius: 6,
+                    callbacks: {
+                        afterBody: function(contexts) {
+                            if (!contexts || contexts.length === 0) return '';
+                            const idx = contexts[0].dataIndex;
+                            const item = byCat[idx] || {};
+                            return `样本总数: ${item.count} 份\n中位数: ${item.median_rms} | 最大值: ${item.max_rms}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: CHART_DEFAULTS.gridColor },
+                    ticks: {
+                        color: CHART_DEFAULTS.tickColor,
+                        font: { size: 10, family: 'JetBrains Mono' }
+                    }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: {
+                        color: CHART_DEFAULTS.tickColor,
+                        font: { size: 11, weight: '600' }
+                    }
                 }
             }
         }
