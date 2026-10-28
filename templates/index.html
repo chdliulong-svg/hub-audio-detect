@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>轮毂异响检测系统 - 3核心大模型实时协同监控大屏</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=3.7">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.8">
 </head>
 <body>
 
@@ -365,6 +365,41 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Historical Log Table Pagination Bar -->
+            <div class="history-pagination-bar" id="historyPaginationBar">
+                <div class="pagination-info">
+                    <span>显示第 <strong id="histPageCurrent">1</strong> / <span id="histPageTotal">1</span> 页</span>
+                    <span class="pagination-count-tag">(当前显示 <span id="histPageShowing">0</span> 条，共 <strong id="histTotalCount">0</strong> 条记录)</span>
+                </div>
+                
+                <div class="pagination-controls">
+                    <div class="page-size-selector">
+                        <span>每页显示:</span>
+                        <select id="histPageSizeSelect" onchange="changeHistoryPageSize(this.value)">
+                            <option value="15" selected>15 条</option>
+                            <option value="30">30 条</option>
+                            <option value="50">50 条</option>
+                            <option value="100">100 条</option>
+                        </select>
+                    </div>
+
+                    <div class="pagination-btn-group">
+                        <button class="page-nav-btn" id="btnHistFirst" onclick="gotoHistoryPage(1)" title="跳转到首页">⏮ 首页</button>
+                        <button class="page-nav-btn" id="btnHistPrev" onclick="changeHistoryPage(-1)" title="上一页">◀ 上一页</button>
+                        <div id="histPageNumberButtons" class="page-number-buttons"></div>
+                        <button class="page-nav-btn" id="btnHistNext" onclick="changeHistoryPage(1)" title="下一页">下一页 ▶</button>
+                        <button class="page-nav-btn" id="btnHistLast" onclick="gotoHistoryLastPage()" title="跳转到末页">末页 ⏩</button>
+                    </div>
+
+                    <div class="pagination-jump">
+                        <span>跳至</span>
+                        <input type="number" id="histJumpPageInput" min="1" value="1" onkeydown="if(event.key==='Enter') jumpToHistoryPage()">
+                        <span>页</span>
+                        <button class="page-nav-btn" onclick="jumpToHistoryPage()" style="padding: 3px 8px;">跳转</button>
+                    </div>
+                </div>
+            </div>
         </section>
 
     </main>
@@ -518,6 +553,6 @@
         </div>
     </footer>
 
-    <script src="/static/js/monitor.js?v=3.1"></script>
+    <script src="/static/js/monitor.js?v=3.2"></script>
 </body>
 </html>

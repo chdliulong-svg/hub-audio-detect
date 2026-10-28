@@ -8,6 +8,10 @@ let currentConsensusFilter = 'ALL';
 let currentSearchQuery = '';
 let lastSeenFilename = '';
 
+// 历史记录表格分页控制器状态
+let currentHistoryPage = 1;
+let historyPageSize = 15;
+
 // 当前看板遥测对象与回放模式状态机
 let currentHeroData = null;
 let isPlaybackMode = false;
@@ -311,15 +315,30 @@ function renderHistoryTable() {
         return true;
     });
 
-    const searchTip = currentSearchQuery ? ` (搜索: "${currentSearchQuery}")` : '';
-    document.getElementById('historyCount').innerText = `共 ${currentFilteredRecords.length} 条记录${searchTip}`;
+    const totalCount = currentFilteredRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
+    
+    // 页面边界校验
+    if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
+    if (currentHistoryPage < 1) currentHistoryPage = 1;
 
-    if (currentFilteredRecords.length === 0) {
+    const startIdx = (currentHistoryPage - 1) * historyPageSize;
+    const endIdx = Math.min(totalCount, startIdx + historyPageSize);
+    const pageRecords = currentFilteredRecords.slice(startIdx, endIdx);
+
+    const searchTip = currentSearchQuery ? ` (搜索: "${currentSearchQuery}")` : '';
+    document.getElementById('historyCount').innerText = `共 ${totalCount} 条记录${searchTip}`;
+
+    // 实时更新分页控件状态
+    updateHistoryPaginationUI(totalCount, totalPages, startIdx, endIdx);
+
+    if (totalCount === 0) {
         tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">无匹配记录${currentSearchQuery ? ' (未找到包含关键词的诊断事件)' : ''}</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = currentFilteredRecords.map((r, i) => {
+    tbody.innerHTML = pageRecords.map((r, i) => {
+        const globalIdx = startIdx + i;
         const itemKey = `${r.filename}_${r.timestamp}`;
         const isCurrentActive = isPlaybackMode && (itemKey === currentPlaybackKey);
         const rowClass = isCurrentActive ? 'class="active-replay-row"' : '';
@@ -329,7 +348,7 @@ function renderHistoryTable() {
 
         return `
         <tr ${rowClass}>
-            <td>${i + 1}</td>
+            <td>${globalIdx + 1}</td>
             <td style="font-family:var(--font-mono);color:var(--text-muted)">${r.timestamp ? r.timestamp.slice(11) : '--'}</td>
             <td style="font-family:var(--font-mono);font-weight:700">${r.filename}</td>
             <td><span class="badge ${r.consensus_badge}">${r.alarm_votes}/3 票</span></td>
@@ -340,22 +359,130 @@ function renderHistoryTable() {
             <td style="font-family:var(--font-mono)">${r.peak_amplitude !== undefined ? r.peak_amplitude.toFixed(3) : '--'} / ${r.rms_amplitude !== undefined ? r.rms_amplitude.toFixed(4) : '--'}</td>
             <td><span class="badge ${r.consensus_badge}">${r.consensus_level}</span></td>
             <td>
-                <span class="badge ${rev.badge_class || 'badge-unreviewed'}" title="${revTip}" style="cursor:pointer" onclick="openReviewModalByIndex(${i})">
+                <span class="badge ${rev.badge_class || 'badge-unreviewed'}" title="${revTip}" style="cursor:pointer" onclick="openReviewModalByIndex(${globalIdx})">
                     ${rev.status_text || '待复核'}
                 </span>
                 ${rev.reviewer ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono)">${rev.reviewer}</div>` : ''}
             </td>
             <td style="white-space:nowrap">
-                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="openReviewModalByIndex(${i})" title="进行人工复核判定">
+                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="openReviewModalByIndex(${globalIdx})" title="进行人工复核判定">
                     ✍️ 复核
                 </button>
-                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="playbackRecord(${i})">
+                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="playbackRecord(${globalIdx})">
                     ${isCurrentActive ? '👀 回放中' : '⏮ 回放'}
                 </button>
             </td>
         </tr>
         `;
     }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// 历史记录表格分页控制器
+// ---------------------------------------------------------------------------
+function updateHistoryPaginationUI(totalCount, totalPages, startIdx, endIdx) {
+    const curEl = document.getElementById('histPageCurrent');
+    const totEl = document.getElementById('histPageTotal');
+    const showEl = document.getElementById('histPageShowing');
+    const cntEl = document.getElementById('histTotalCount');
+    const jumpInput = document.getElementById('histJumpPageInput');
+
+    if (curEl) curEl.innerText = totalCount === 0 ? 0 : currentHistoryPage;
+    if (totEl) totEl.innerText = totalPages;
+    if (showEl) showEl.innerText = Math.max(0, endIdx - startIdx);
+    if (cntEl) cntEl.innerText = totalCount;
+    if (jumpInput) {
+        jumpInput.max = totalPages;
+        jumpInput.value = currentHistoryPage;
+    }
+
+    const btnFirst = document.getElementById('btnHistFirst');
+    const btnPrev = document.getElementById('btnHistPrev');
+    const btnNext = document.getElementById('btnHistNext');
+    const btnLast = document.getElementById('btnHistLast');
+
+    if (btnFirst) btnFirst.disabled = (currentHistoryPage <= 1);
+    if (btnPrev) btnPrev.disabled = (currentHistoryPage <= 1);
+    if (btnNext) btnNext.disabled = (currentHistoryPage >= totalPages || totalCount === 0);
+    if (btnLast) btnLast.disabled = (currentHistoryPage >= totalPages || totalCount === 0);
+
+    // 智能渲染页码数字按钮 (当前页前后滑动窗口)
+    const numContainer = document.getElementById('histPageNumberButtons');
+    if (!numContainer) return;
+
+    if (totalCount === 0 || totalPages <= 1) {
+        numContainer.innerHTML = totalCount > 0 ? `<button class="page-num-btn active">1</button>` : '';
+        return;
+    }
+
+    let pagesToRender = [];
+    if (totalPages <= 7) {
+        for (let p = 1; p <= totalPages; p++) pagesToRender.push(p);
+    } else {
+        pagesToRender.push(1);
+        let start = Math.max(2, currentHistoryPage - 1);
+        let end = Math.min(totalPages - 1, currentHistoryPage + 1);
+
+        if (currentHistoryPage <= 3) {
+            start = 2;
+            end = 4;
+        } else if (currentHistoryPage >= totalPages - 2) {
+            start = totalPages - 3;
+            end = totalPages - 1;
+        }
+
+        if (start > 2) pagesToRender.push('...');
+        for (let p = start; p <= end; p++) pagesToRender.push(p);
+        if (end < totalPages - 1) pagesToRender.push('...');
+        pagesToRender.push(totalPages);
+    }
+
+    numContainer.innerHTML = pagesToRender.map(p => {
+        if (p === '...') return `<span class="page-ellipsis">...</span>`;
+        const activeClass = (p === currentHistoryPage) ? 'active' : '';
+        return `<button class="page-num-btn ${activeClass}" onclick="gotoHistoryPage(${p})">${p}</button>`;
+    }).join('');
+}
+
+function changeHistoryPage(delta) {
+    const totalCount = currentFilteredRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
+    const target = currentHistoryPage + delta;
+    if (target >= 1 && target <= totalPages) {
+        currentHistoryPage = target;
+        renderHistoryTable();
+    }
+}
+
+function gotoHistoryPage(p) {
+    const totalCount = currentFilteredRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
+    const pageNum = parseInt(p, 10);
+    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+        currentHistoryPage = pageNum;
+        renderHistoryTable();
+    }
+}
+
+function gotoHistoryLastPage() {
+    const totalCount = currentFilteredRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
+    gotoHistoryPage(totalPages);
+}
+
+function changeHistoryPageSize(newSize) {
+    historyPageSize = parseInt(newSize, 10) || 15;
+    currentHistoryPage = 1;
+    renderHistoryTable();
+}
+
+function jumpToHistoryPage() {
+    const input = document.getElementById('histJumpPageInput');
+    if (!input) return;
+    const val = parseInt(input.value, 10);
+    if (!isNaN(val)) {
+        gotoHistoryPage(val);
+    }
 }
 
 // 点击回放指定历史记录
@@ -466,6 +593,7 @@ let currentKpiModalSearch = '';
 function selectKpiTab(tabKey, cardEl, openModal = true) {
     currentFilter = tabKey;
     currentConsensusFilter = 'ALL';
+    currentHistoryPage = 1;
 
     // 1. 同步顶部选项卡高亮样式
     document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active-tab'));
@@ -722,6 +850,7 @@ function scrollFromModalToMainTable() {
 function setHistoryFilter(f, btn) {
     currentFilter = f;
     currentConsensusFilter = 'ALL';
+    currentHistoryPage = 1;
     const thSel = document.getElementById('thConsensusSelect');
     if (thSel) thSel.value = 'ALL';
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -753,6 +882,7 @@ function setHistoryFilter(f, btn) {
 
 function handleSelectConsensusFilter(val) {
     currentConsensusFilter = val || 'ALL';
+    currentHistoryPage = 1;
     const thSel = document.getElementById('thConsensusSelect');
     if (thSel) thSel.value = currentConsensusFilter;
     if (currentConsensusFilter !== 'ALL') {
@@ -767,6 +897,7 @@ function handleSelectConsensusFilter(val) {
 
 function handleSearchInput(val) {
     currentSearchQuery = val ? val.trim().toLowerCase() : '';
+    currentHistoryPage = 1;
     const clearBtn = document.getElementById('btnSearchClear');
     if (clearBtn) {
         clearBtn.style.display = currentSearchQuery ? 'block' : 'none';
@@ -776,6 +907,7 @@ function handleSearchInput(val) {
 
 function clearSearchInput() {
     currentSearchQuery = '';
+    currentHistoryPage = 1;
     const input = document.getElementById('historySearchInput');
     if (input) input.value = '';
     const clearBtn = document.getElementById('btnSearchClear');
