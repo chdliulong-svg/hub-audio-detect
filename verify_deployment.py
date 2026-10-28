@@ -28,6 +28,7 @@ print("=" * 70)
 print("\n[1/4] 检查 Python 核心依赖库...")
 libs = [
     ("Flask", "flask"),
+    ("Waitress", "waitress"),
     ("PyTorch", "torch"),
     ("TorchAudio", "torchaudio"),
     ("TorchVision", "torchvision"),

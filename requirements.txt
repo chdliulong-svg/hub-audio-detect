@@ -1,5 +1,6 @@
 # 03 核心 3 模型协同投票监控系统 Python 依赖 (Win10 CPU / GPU 通用)
 flask>=2.2.0
+waitress>=2.1.0
 torch>=2.0.0
 torchaudio>=2.0.0
 torchvision>=0.15.0

@@ -1967,16 +1967,23 @@ def api_admin_backups_download(filename):
     return send_from_directory(backup_dir, filename, as_attachment=True)
 
 # ---------------------------------------------------------------------------
-# 主程序入口
+# 主程序入口 (工业级 WSGI 生产服务)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     host = SERVER_CFG.get("host", "127.0.0.1")
     port = int(SERVER_CFG.get("port", 8088))
+    threads = int(SERVER_CFG.get("wsgi_threads", 8))
     
     print("=" * 70)
-    print(f">> [3-Model Realtime Monitor] 服务已启动！")
+    print(f">> [3-Model Realtime Monitor] 工业级声学实时监控服务启动中...")
     print(f">> 监控网页端控制台: http://{host}:{port}")
     print(f">> 后台管理中心页面: http://{host}:{port}/admin")
     print("=" * 70 + "\n")
     
-    app.run(host=host, port=port, debug=False, threaded=True)
+    try:
+        from waitress import serve
+        print(f">> [WSGI Engine] 生产级 WSGI 服务器已就绪 (Waitress, 并发线程: {threads})")
+        serve(app, host=host, port=port, threads=threads, channel_timeout=60)
+    except ImportError:
+        print(">> [WSGI Engine] 未检测到 waitress 依赖，回退至内置开发服务器...")
+        app.run(host=host, port=port, debug=False, threaded=True)
