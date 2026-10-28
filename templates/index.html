@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>风电碰撞声学诊断 - 3核心大模型实时协同监控大屏</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.7">
+</head>
+<body>
+
+    <!-- Top Sticky Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo-box">
+                <span class="logo-icon">⚡</span>
+                <div class="logo-text">
+                    <h1>风电机组碰撞声学智能诊断系统</h1>
+                </div>
+            </div>
+            <div class="status-indicator online" id="sysOnlineIndicator">
+                <span class="pulse-dot"></span>
+                <span id="sysOnlineText">实时在线监测中 (ONLINE)</span>
+            </div>
+            <div class="node-pill">
+                <span class="node-icon">📡</span>
+                <span>监测节点: <strong>{{ config.turbine_node }}</strong></span>
+            </div>
+            <div class="node-pill" title="自动归档: {{ config.monitor.watch_dir }}/processed">
+                <span>📂 监听目录: <code id="headerWatchDirCode">{{ config.monitor.watch_dir }}</code></span>
+            </div>
+        </div>
+        <div class="header-right">
+            <input type="file" id="audioUploadInput" accept=".wav,.bin,.WAV,.BIN,audio/wav,audio/x-wav,application/octet-stream" style="display:none" onchange="handleManualUpload(this)">
+            <button class="btn btn-primary" onclick="document.getElementById('audioUploadInput').click()" title="支持投递 .wav 或 .bin 现场音频文件直接分析">
+                📁 投递音频
+            </button>
+            <button class="btn btn-outline" onclick="exportHistoryCSV()">
+                📥 导出日志
+            </button>
+            <a href="/admin#tab-analytics" class="btn btn-outline" style="text-decoration:none" title="多维度历史统计与数据可视化分析">
+                📊 数据分析统计
+            </a>
+            <a href="/admin" class="btn btn-outline" style="text-decoration:none">
+                ⚙️ 后台管理
+            </a>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+
+        <!-- KPI Status Cards (Clickable Tabs for Detailed Files) -->
+        <section class="kpi-row">
+            <div class="kpi-card active-tab" id="kpiCard-all" onclick="selectKpiTab('all', this)" title="点击查看累计处理全部音频文件清单">
+                <div class="kpi-header">
+                    <span class="kpi-label">累计处理音频</span>
+                    <span class="kpi-icon">📊</span>
+                </div>
+                <div class="kpi-value" id="kpiTotal">0 <span class="kpi-unit">份</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-critical" id="kpiCard-vote3" onclick="selectKpiTab('vote3', this)" title="点击查看 3/3 票全票确诊碰撞文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">3/3 票全票确诊</span>
+                    <span class="kpi-icon">🚨</span>
+                </div>
+                <div class="kpi-value crit-text" id="kpiUnanimous">0 <span class="kpi-unit">份</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-majority" id="kpiCard-vote2" onclick="selectKpiTab('vote2', this)" title="点击查看 2/3 票多数确诊碰撞文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">2/3 票多数确诊</span>
+                    <span class="kpi-icon">⚠️</span>
+                </div>
+                <div class="kpi-value high-text" id="kpiMajority">0 <span class="kpi-unit">份</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-safe" id="kpiCard-vote1" onclick="selectKpiTab('vote1', this)" title="点击查看孤立扰动门禁拦截文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">孤立扰动门禁拦截</span>
+                    <span class="kpi-icon">🛡️</span>
+                </div>
+                <div class="kpi-value safe-text" id="kpiShielded">0 <span class="kpi-unit">次</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-normal" id="kpiCard-vote0" onclick="selectKpiTab('vote0', this)" title="点击查看正常平稳底噪放行文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">正常平稳底噪放行</span>
+                    <span class="kpi-icon">🍃</span>
+                </div>
+                <div class="kpi-value normal-text" id="kpiNormal">0 <span class="kpi-unit">份</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-startup" id="kpiCard-startup" onclick="selectKpiTab('startup', this)" title="点击查看现场机组启动工况文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">现场机组启动工况</span>
+                    <span class="kpi-icon">🚀</span>
+                </div>
+                <div class="kpi-value startup-text" id="kpiStartup">0 <span class="kpi-unit">次</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+            <div class="kpi-card card-shutdown" id="kpiCard-shutdown" onclick="selectKpiTab('shutdown', this)" title="点击查看现场机组停机工况文件详细信息">
+                <div class="kpi-header">
+                    <span class="kpi-label">现场机组停机工况</span>
+                    <span class="kpi-icon">🛑</span>
+                </div>
+                <div class="kpi-value shutdown-text" id="kpiShutdown">0 <span class="kpi-unit">次</span></div>
+                <div class="kpi-click-hint">点击查看清单 ➔</div>
+            </div>
+        </section>
+
+        <!-- Playback Mode Sticky Notice (shown only when replaying historical records) -->
+        <div id="playbackNotice" class="playback-notice-bar" style="display: none;">
+            <div class="playback-info">
+                <span class="playback-badge">⏮ 历史回放模式</span>
+                <span>正在看板复现历史事件: <strong id="playbackFileName" style="color:#60a5fa;font-family:var(--font-mono)">--</strong> (<span id="playbackTime" style="color:var(--text-muted)">--</span>)</span>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="exitPlaybackMode()">
+                🔄 退出回放 · 返回实时监测
+            </button>
+        </div>
+
+        <!-- Main Realtime Telemetry Grid -->
+        <div class="telemetry-grid">
+
+            <!-- Left: Hero Decision Panel & 3 Models -->
+            <section class="hero-panel">
+                
+                <!-- Decision Alert Banner (Ultra Compact) -->
+                <div class="decision-banner" id="decisionBanner">
+                    <div class="banner-badge-wrapper">
+                        <span class="banner-icon" id="bannerIcon">🍃</span>
+                        <div class="banner-text-box">
+                            <span class="banner-title" id="bannerTitle">等待现场音频推送，监控就绪...</span>
+                            <span class="banner-level" id="bannerLevel">NORMAL_CLEAN_NOISE</span>
+                        </div>
+                    </div>
+                    <div class="banner-metrics">
+                        <div class="b-metric">
+                            <span class="b-lbl">3模型表决票数</span>
+                            <span class="b-val" id="bannerVotes">0 / 3 票</span>
+                        </div>
+                        <div class="b-metric">
+                            <span class="b-lbl">平均碰撞置信度</span>
+                            <span class="b-val" id="bannerMeanConf">0.0%</span>
+                        </div>
+                        <div class="b-metric">
+                            <span class="b-lbl">人工复核仲裁</span>
+                            <div class="review-actions">
+                                <span class="badge badge-unreviewed" id="heroReviewBadge">⏳ 待复核</span>
+                                <button class="btn btn-outline btn-sm" onclick="openHeroReviewModal()" style="padding:2px 8px;font-size:11px;font-weight:700">
+                                    ✍️ 人工复核
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3 Models Live Voting Meter Strip -->
+                <div class="models-voting-strip">
+                    
+                    <!-- 03R Model Card -->
+                    <div class="model-vote-card" id="mCard-03R">
+                        <div class="m-card-head">
+                            <div class="m-name-group">
+                                <span class="m-code">03R</span>
+                                <span class="m-name">GRAM-Mono</span>
+                            </div>
+                        </div>
+                        <div class="m-card-body">
+                            <div class="m-gauge-container">
+                                <div class="m-gauge-bar">
+                                    <div class="m-gauge-fill" id="mFill-03R" style="width: 0%"></div>
+                                    <div class="m-gauge-thresh" style="left: 90%" title="90% 严选告警阈值"></div>
+                                </div>
+                                <div class="m-score-row">
+                                    <span class="m-score-val" id="mScore-03R">0.0%</span>
+                                    <span class="m-vote-badge" id="mVote-03R">未投票</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 03K Model Card -->
+                    <div class="model-vote-card" id="mCard-03K">
+                        <div class="m-card-head">
+                            <div class="m-name-group">
+                                <span class="m-code">03K</span>
+                                <span class="m-name">Dasheng-Base</span>
+                            </div>
+                        </div>
+                        <div class="m-card-body">
+                            <div class="m-gauge-container">
+                                <div class="m-gauge-bar">
+                                    <div class="m-gauge-fill" id="mFill-03K" style="width: 0%"></div>
+                                    <div class="m-gauge-thresh" style="left: 90%" title="90% 严选告警阈值"></div>
+                                </div>
+                                <div class="m-score-row">
+                                    <span class="m-score-val" id="mScore-03K">0.0%</span>
+                                    <span class="m-vote-badge" id="mVote-03K">未投票</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 03U Model Card -->
+                    <div class="model-vote-card" id="mCard-03U">
+                        <div class="m-card-head">
+                            <div class="m-name-group">
+                                <span class="m-code">03U</span>
+                                <span class="m-name">ECHOv2</span>
+                            </div>
+                        </div>
+                        <div class="m-card-body">
+                            <div class="m-gauge-container">
+                                <div class="m-gauge-bar">
+                                    <div class="m-gauge-fill" id="mFill-03U" style="width: 0%"></div>
+                                    <div class="m-gauge-thresh" style="left: 90%" title="90% 严选告警阈值"></div>
+                                </div>
+                                <div class="m-score-row">
+                                    <span class="m-score-val" id="mScore-03U">0.0%</span>
+                                    <span class="m-vote-badge" id="mVote-03U">未投票</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Acoustic Physics Metrics Strip -->
+                <div class="physics-strip">
+                    <div class="p-item">
+                        <span class="p-lbl">当前音频文件</span>
+                        <span class="p-val" id="valFilename">--</span>
+                    </div>
+                    <div class="p-item">
+                        <span class="p-lbl">峰值幅值 (Peak)</span>
+                        <span class="p-val" id="valPeak">--</span>
+                    </div>
+                    <div class="p-item">
+                        <span class="p-lbl">RMS 有效值</span>
+                        <span class="p-val" id="valRms">--</span>
+                    </div>
+                    <div class="p-item">
+                        <span class="p-lbl">峰值因子 (Crest)</span>
+                        <span class="p-val" id="valCrest">--</span>
+                    </div>
+                    <div class="p-item">
+                        <span class="p-lbl">幅值饱和状态</span>
+                        <span class="p-val" id="valClip">正常</span>
+                    </div>
+                    <div class="p-item">
+                        <span class="p-lbl">端到端推理耗时</span>
+                        <span class="p-val" id="valInferTime">-- ms</span>
+                    </div>
+                </div>
+
+                <!-- In-Browser Audio Player -->
+                <div class="audio-strip">
+                    <span class="audio-lbl">🎧 现场原声回放试听:</span>
+                    <audio id="audioPlayer" controls class="live-audio-player">
+                        您的浏览器不支持音频播放
+                    </audio>
+                </div>
+
+            </section>
+
+            <!-- Right: Diagnostic Plot Real-time Render View -->
+            <section class="plot-panel" id="plotPanelSection">
+                <div class="panel-header">
+                    <div class="panel-title-group">
+                        <span>📈 声学时频谱诊断图</span>
+                        <span id="plotFileBadge" class="plot-file-pill">等待音频中...</span>
+                    </div>
+                    <button class="btn btn-outline" style="padding:4px 10px;font-size:11px" onclick="openImageModal()">
+                        🔍 放大全屏
+                    </button>
+                </div>
+                <div class="plot-canvas-box" onclick="openImageModal()">
+                    <img id="diagnosticPlotImg" src="" alt="声学诊断图" class="plot-image" style="display:none">
+                    <div class="plot-placeholder" id="plotPlaceholder">
+                        <span>⏳ 等待音频注入后自动生成双面板高精度诊断图谱...</span>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Historical Log Table -->
+        <section class="history-section" id="historySection">
+            <div class="history-header">
+                <div class="history-title-group">
+                    <h2>📋 实时诊断事件历史记录 (防误报过滤台账)</h2>
+                    <span class="history-count" id="historyCount">共 0 条记录</span>
+                </div>
+                <div class="history-controls-row">
+                    <div class="history-filters">
+                        <button class="filter-btn active" onclick="setHistoryFilter('all', this)">全部</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('vote3', this)">🔴 全票确诊 (3票)</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('vote2', this)">🟠 多数表决 (2票)</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('vote1', this)">🟡 孤立扰动 (1票)</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('vote0', this)">🟢 平稳底噪 (0票)</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('startup', this)">🚀 现场启动</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('shutdown', this)">🛑 现场停机</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('unreviewed', this)">⏳ 待复核</button>
+                        <button class="filter-btn" onclick="setHistoryFilter('reviewed', this)">✅ 已复核</button>
+                    </div>
+                    <div class="history-search-box">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="historySearchInput" class="history-search-input" placeholder="搜索文件名、日期、结论或复核人..." oninput="handleSearchInput(this.value)">
+                        <button class="search-clear-btn" id="btnSearchClear" onclick="clearSearchInput()" title="清空搜索" style="display: none;">&times;</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Tab Filter Info Banner -->
+            <div id="kpiTabActiveBanner" class="tab-filter-banner" style="display: none;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 15px;">📌</span>
+                    <span>当前选项卡已锁定：<strong id="tabBannerName" style="color: #1d4ed8;">--</strong> (<span id="tabBannerCount">0 份文件</span>)</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn btn-primary btn-sm" onclick="reopenCurrentKpiModal()" style="padding: 3px 10px; font-size: 11px;">
+                        📋 弹出详细文件清单
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="selectKpiTab('all', null, false)" style="padding: 3px 10px; font-size: 11px;">
+                        ✖️ 显示全部文件
+                    </button>
+                </div>
+            </div>
+            <div class="table-scroll-wrapper">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>序号</th>
+                            <th>时间戳</th>
+                            <th>文件名</th>
+                            <th>3模型票数</th>
+                            <th>平均置信度</th>
+                            <th>03K (Dasheng)</th>
+                            <th>03U (ECHOv2)</th>
+                            <th>03R (GRAM-Mono)</th>
+                            <th>峰值 / RMS</th>
+                            <th>
+                                <div class="th-filter-wrapper">
+                                    <span>仲裁决策状态</span>
+                                    <select id="thConsensusSelect" class="th-select-filter" onchange="handleSelectConsensusFilter(this.value)" title="直接按决策状态下拉筛选">
+                                        <option value="ALL">全部状态</option>
+                                        <option value="NORMAL_CLEAN_NOISE">🟢 NORMAL_CLEAN_NOISE</option>
+                                        <option value="CRITICAL_COLLISION_UNANIMOUS">🔴 全票确诊 (3票)</option>
+                                        <option value="MAJORITY_COLLISION_ALARM">🟠 多数确诊 (2票)</option>
+                                        <option value="ISOLATED_DISTURBANCE_SAFE">🟡 孤立扰动 (1票)</option>
+                                        <option value="MACHINE_STARTUP_SAFE">🚀 现场启动工况</option>
+                                        <option value="MACHINE_SHUTDOWN_SAFE">🛑 现场停机工况</option>
+                                        <option value="HARDWARE_CLIPPING_DISCARD">⚡ 幅值饱和</option>
+                                    </select>
+                                </div>
+                            </th>
+                            <th>人工复核结论</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr>
+                            <td colspan="12" style="text-align:center;color:var(--text-muted);padding:30px">
+                                暂无历史诊断记录，请投递音频至 incoming_audio 或点击上方投递音频按钮
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modal for Full Screen Image -->
+    <div id="imageModal" class="modal" onclick="closeModal()">
+        <span class="modal-close">&times;</span>
+        <img class="modal-content" id="modalImg">
+    </div>
+
+    <!-- Modal for Manual Review -->
+    <div id="reviewModal" class="modal" onclick="closeReviewModal()">
+        <div class="review-modal-box" onclick="event.stopPropagation()">
+            <div class="review-modal-head">
+                <h3>✍️ 人工复核与判定校准</h3>
+                <button class="review-modal-close" onclick="closeReviewModal()">&times;</button>
+            </div>
+            <div class="review-modal-body">
+                <div class="review-meta-card">
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">音频文件名:</span>
+                        <strong id="revModalFilename" style="font-family:var(--font-mono);color:var(--text-main)">--</strong>
+                    </div>
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">诊断时间戳:</span>
+                        <span id="revModalTime" style="font-family:var(--font-mono)">--</span>
+                    </div>
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">模型协同仲裁:</span>
+                        <span id="revModalConsensus">--</span>
+                    </div>
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">请选择人工复核结论 (点击切换):</label>
+                    <div class="review-options-grid">
+                        <div class="review-option-card selected" id="opt-CONFIRMED_COLLISION" onclick="selectReviewOption('CONFIRMED_COLLISION')">
+                            <div class="review-option-title" style="color:#dc2626">🔴 确认为真碰撞</div>
+                            <div class="review-option-desc">确诊现场发生真实机械碰擦或结构异常撞击</div>
+                        </div>
+                        <div class="review-option-card" id="opt-CONFIRMED_FALSE_ALARM" onclick="selectReviewOption('CONFIRMED_FALSE_ALARM')">
+                            <div class="review-option-title" style="color:#d97706">🟡 确认为误报/扰动</div>
+                            <div class="review-option-desc">外界偶发环境异响、气流冲击或电磁杂音扰动</div>
+                        </div>
+                        <div class="review-option-card" id="opt-CONFIRMED_NORMAL" onclick="selectReviewOption('CONFIRMED_NORMAL')">
+                            <div class="review-option-title" style="color:#16a34a">🟢 确认正常运转</div>
+                            <div class="review-option-desc">设备健康平稳运行，无任何异常振动碰撞</div>
+                        </div>
+                        <div class="review-option-card" id="opt-CONFIRMED_STARTUP" onclick="selectReviewOption('CONFIRMED_STARTUP')">
+                            <div class="review-option-title" style="color:#0284c7">🚀 确认现场启动</div>
+                            <div class="review-option-desc">风电机组/机电系统正常并网、起机提速爬升工况</div>
+                        </div>
+                        <div class="review-option-card" id="opt-CONFIRMED_SHUTDOWN" onclick="selectReviewOption('CONFIRMED_SHUTDOWN')">
+                            <div class="review-option-title" style="color:#0d9488">🛑 确认现场停机</div>
+                            <div class="review-option-desc">机组正常脱网、刹车制动、自由惰行或跳闸停机工况</div>
+                        </div>
+                        <div class="review-option-card" id="opt-CONFIRMED_HARDWARE_FAULT" onclick="selectReviewOption('CONFIRMED_HARDWARE_FAULT')">
+                            <div class="review-option-title" style="color:#9333ea">🟣 传感器/硬件故障</div>
+                            <div class="review-option-desc">采集通道电压死锁、饱和削顶或线路接触不良</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">复核专家 / 质检员姓名:</label>
+                    <input type="text" id="revModalReviewer" class="review-input-field" placeholder="例如：现场工程师 / 张工">
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">专家复核说明 / 现场勘验备注 (选填):</label>
+                    <textarea id="revModalNotes" class="review-textarea-field" placeholder="记录现场确认细节，例如：现场排查确认轴承无刮痕，系外部气流偶发异响..."></textarea>
+                </div>
+            </div>
+            <div class="review-modal-foot">
+                <button class="btn btn-outline" onclick="closeReviewModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitReviewAction()" id="btnSubmitReview">💾 确认提交复核结论</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated KPI Tab File Details Modal -->
+    <div id="kpiDetailModal" class="modal" onclick="closeKpiDetailModal()">
+        <div class="kpi-modal-box" onclick="event.stopPropagation()">
+            <div class="kpi-modal-head">
+                <div class="kpi-modal-title-group">
+                    <span id="kpiModalIcon" style="font-size: 22px;">📊</span>
+                    <div>
+                        <h3 id="kpiModalTitle" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-main);">分类文件详细信息</h3>
+                        <div id="kpiModalDesc" style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">共找到 0 份文件</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="kpi-modal-search">
+                        <span>🔍</span>
+                        <input type="text" id="kpiModalSearchInput" placeholder="在当前分类中过滤文件名/时间..." oninput="filterKpiModalRecords(this.value)">
+                    </div>
+                    <span class="modal-close" onclick="closeKpiDetailModal()" style="position: static; font-size: 26px; line-height: 1; color: var(--text-muted); cursor: pointer;" title="关闭">&times;</span>
+                </div>
+            </div>
+            
+            <div class="kpi-modal-body">
+                <div class="table-scroll-wrapper" style="max-height: 520px; overflow-y: auto;">
+                    <table class="history-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr>
+                                <th style="width: 45px;">#</th>
+                                <th style="width: 90px;">时间戳</th>
+                                <th>音频文件名</th>
+                                <th style="width: 80px;">3模型票数</th>
+                                <th style="width: 80px;">平均置信度</th>
+                                <th style="width: 70px;">03K</th>
+                                <th style="width: 70px;">03U</th>
+                                <th style="width: 70px;">03R</th>
+                                <th style="width: 110px;">峰值 / RMS</th>
+                                <th style="width: 140px;">仲裁决策状态</th>
+                                <th style="width: 100px;">人工复核</th>
+                                <th style="width: 165px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kpiModalTableBody">
+                            <!-- Injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="kpi-modal-foot">
+                <div style="font-size: 12px; color: var(--text-muted);">
+                    显示第 <strong id="kpiModalCurrentCount" style="color:var(--text-main)">0</strong> 份 / 共 <strong id="kpiModalTotalCount" style="color:#2563eb">0</strong> 份音频
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-primary" onclick="scrollFromModalToMainTable()" style="font-size: 12px; padding: 6px 14px;">
+                        👇 在主页面表格中查看
+                    </button>
+                    <button class="btn btn-outline" onclick="closeKpiDetailModal()" style="font-size: 12px; padding: 6px 14px;">
+                        关闭
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/monitor.js?v=3.1"></script>
+</body>
+</html>

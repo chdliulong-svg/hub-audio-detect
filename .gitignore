@@ -1,0 +1,29 @@
+# =============================================================================
+# Git Ignore Configuration for Standalone Deployment Package
+# =============================================================================
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+dist/
+build/
+
+# OS & Editor
+.vscode/
+.idea/
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
+
+# Large Model Foundation Backbones (>100MB)
+# Note: Fine-tuned collision transfer heads (*_transfer.pt) are tracked directly in git.
+*.safetensors
+
+# Runtime Logs & Dynamic Processed Buffers
+records/*.log
+*.log
+incoming_audio/processed/*
+!incoming_audio/processed/.gitkeep

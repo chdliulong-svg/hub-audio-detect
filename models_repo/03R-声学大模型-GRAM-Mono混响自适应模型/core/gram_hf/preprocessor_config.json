@@ -1,0 +1,12 @@
+{
+  "auto_map": {
+    "AutoFeatureExtractor": "feature_extraction_gramt_mono.MonoFeatureExtractor"
+  },
+  "feature_extractor_type": "MonoFeatureExtractor",
+  "feature_size": 1,
+  "num_mel_bins": 128,
+  "padding_side": "right",
+  "padding_value": 0.0,
+  "return_attention_mask": true,
+  "sampling_rate": 32000
+}

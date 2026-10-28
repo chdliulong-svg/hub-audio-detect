@@ -1,0 +1,35 @@
+{
+  "architectures": [
+    "GRAMTMonoModel"
+  ],
+  "auto_map": {
+    "AutoConfig": "configuration_gramt_mono.GRAMTMonoConfig",
+    "AutoModel": "modeling_gramt_mono.GRAMTMonoModel"
+  },
+  "decoder_depth": 8,
+  "decoder_embedding_dim": 512,
+  "decoder_mlp_ratio": 4.0,
+  "decoder_num_heads": 8,
+  "decoder_window_sizes": [
+    2,
+    5,
+    10,
+    25,
+    50,
+    100,
+    0,
+    0
+  ],
+  "encoder_attention_dropout": 0.0,
+  "encoder_dropout": 0.0,
+  "encoder_hidden_dim": 768,
+  "encoder_mlp_ratio": 4.0,
+  "encoder_norm_layer_eps": 1e-06,
+  "encoder_num_heads": 12,
+  "encoder_num_layers": 12,
+  "input_length": 200,
+  "model_type": "gramt-mono",
+  "num_mel_bins": 128,
+  "torch_dtype": "float32",
+  "transformers_version": "4.46.3"
+}

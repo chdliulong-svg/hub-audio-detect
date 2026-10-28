@@ -1,0 +1,17 @@
+# 03 核心 3 模型协同投票监控系统 Python 依赖 (Win10 CPU / GPU 通用)
+flask>=2.2.0
+torch>=2.0.0
+torchaudio>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0
+huggingface_hub>=0.16.0
+timm>=0.9.0
+einops>=0.7.0
+soundfile>=0.12.0
+scipy>=1.10.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+psutil>=5.9.0
+safetensors>=0.3.0

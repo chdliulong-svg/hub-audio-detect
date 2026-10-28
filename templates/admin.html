@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理中心 - 风电机组碰撞声学智能诊断系统</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo-box">
+                <span class="logo-icon">⚙️</span>
+                <div class="logo-text">
+                    <h1>风电机组碰撞声学智能诊断系统 · 后台管理中心</h1>
+                </div>
+            </div>
+            <div class="node-pill">
+                <span>监测节点: <strong>{{ config.turbine_node }}</strong></span>
+            </div>
+        </div>
+        <div class="header-right" style="gap:10px; align-items:center;">
+            <div id="headerAlgoStatusBox" style="display:flex; align-items:center; gap:8px;">
+                <span class="status-pill status-ready" id="headerAlgoStatusBadge">● 算法检测运行中</span>
+                <button class="btn btn-danger btn-xs" id="btnHeaderStopAlgo" onclick="stopAlgorithmEngine()" title="立即暂停后台目录扫描与推理">⏹️ 停止算法</button>
+                <button class="btn btn-success btn-xs" id="btnHeaderStartAlgo" onclick="startAlgorithmEngine()" style="display:none;" title="恢复后台目录扫描与推理">▶️ 启动算法</button>
+            </div>
+            <a href="/" class="btn btn-primary" style="text-decoration:none">
+                📊 返回实时大屏
+            </a>
+            <button class="btn btn-outline" onclick="location.reload()">
+                🔄 刷新
+            </button>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+
+        <!-- Top Navigation Tabs -->
+        <nav class="admin-tabs">
+            <button class="admin-tab-btn" onclick="switchAdminTab('analytics', this)" id="tabBtnAnalytics">
+                📊 数据分析与多维统计
+            </button>
+            <button class="admin-tab-btn active" onclick="switchAdminTab('records', this)" id="tabBtnRecords">
+                📋 诊断台账与记录管理
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('logs', this)" id="tabBtnLogs">
+                📜 实时运行与系统日志
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('system', this)" id="tabBtnSystem">
+                ⚙️ 引擎配置与资源监控
+            </button>
+        </nav>
+
+        <!-- ================================================================= -->
+        <!-- TAB 0: 数据分析与多维统计 (Analytics & Statistics)                 -->
+        <!-- ================================================================= -->
+        <section id="tab-analytics" class="admin-tab-content">
+
+            <!-- Controls & Dimension Toolbar -->
+            <div class="admin-toolbar" style="align-items:flex-start;">
+                <div class="toolbar-left" style="gap:16px;">
+                    <!-- 维度基准 -->
+                    <div class="ana-control-group">
+                        <span class="ana-control-label">统计时间基准:</span>
+                        <div class="filter-pills" id="timeDimPills">
+                            <button class="admin-filter-pill active" onclick="setAnalyticsDimension('audio', this)" title="从文件名 SYYYYYMMDD 提取风电现场原始采样时间">
+                                🎵 音频采样时间 (现场工况)
+                            </button>
+                            <button class="admin-filter-pill" onclick="setAnalyticsDimension('diagnosis', this)" title="按系统算法实际诊断处理的时间戳">
+                                ⏱️ 系统诊断时间 (处理流水)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 时间跨度 -->
+                    <div class="ana-control-group">
+                        <span class="ana-control-label">时间范围:</span>
+                        <div class="filter-pills" id="timeRangePills">
+                            <button class="admin-filter-pill active" onclick="setAnalyticsRange('all', this)">全部历史</button>
+                            <button class="admin-filter-pill" onclick="setAnalyticsRange('30d', this)">近 30 天</button>
+                            <button class="admin-filter-pill" onclick="setAnalyticsRange('7d', this)">近 7 天</button>
+                            <button class="admin-filter-pill" onclick="setAnalyticsRange('24h', this)">近 24 小时</button>
+                            <button class="admin-filter-pill" onclick="setAnalyticsRange('custom', this)">自定义区间</button>
+                        </div>
+                    </div>
+
+                    <!-- 自定义日期选择器 -->
+                    <div id="anaCustomDateBox" class="ana-custom-date-box" style="display:none;">
+                        <input type="date" id="anaStartDate" class="ana-date-input">
+                        <span style="color:var(--text-muted);font-size:12px;">至</span>
+                        <input type="date" id="anaEndDate" class="ana-date-input">
+                        <button class="btn btn-outline btn-sm" onclick="applyCustomDateFilter()">确定</button>
+                    </div>
+
+                    <!-- 工况类型快速筛选 -->
+                    <div class="ana-control-group">
+                        <span class="ana-control-label">工况类型:</span>
+                        <select id="anaCategorySelect" class="ana-select-input" onchange="loadAnalyticsData()">
+                            <option value="ALL">全部工况类型 (全量 7 类)</option>
+                            <option value="CRITICAL_COLLISION_UNANIMOUS">🔴 全票确诊碰撞 (3票)</option>
+                            <option value="MAJORITY_COLLISION_ALARM">🟠 多数表决碰撞 (2票)</option>
+                            <option value="ISOLATED_DISTURBANCE_SAFE">🟡 孤立扰动拦截 (1票)</option>
+                            <option value="NORMAL_CLEAN_NOISE">🟢 正常平稳底噪 (0票)</option>
+                            <option value="HARDWARE_CLIPPING_DISCARD">🟣 幅值饱和</option>
+                            <option value="MACHINE_STARTUP_SAFE">🚀 现场机组启动工况</option>
+                            <option value="MACHINE_SHUTDOWN_SAFE">🛑 现场机组停机工况</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="toolbar-right" style="margin-top:2px;">
+                    <button class="btn btn-primary" onclick="loadAnalyticsData()" title="重新计算并刷新所有统计图表">
+                        🔄 刷新统计
+                    </button>
+                    <button class="btn btn-outline" onclick="exportAnalyticsCSV()" title="导出当前多维汇总报表与趋势明细为 Excel CSV">
+                        📥 导出分析报表 (CSV)
+                    </button>
+                </div>
+            </div>
+
+            <!-- KPI Metric Cards Grid (6 High-Level KPIs) -->
+            <div class="ana-kpi-grid">
+                <div class="ana-kpi-card">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">已纳管样本总量</span>
+                        <span class="ana-kpi-icon">📁</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatTotal">--</strong> <span class="ana-kpi-unit">份</span></div>
+                    <div class="ana-kpi-sub">覆盖 <strong id="anaStatDays">--</strong> 个有效日期区间</div>
+                </div>
+
+                <div class="ana-kpi-card crit">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">结构碰撞确诊告警</span>
+                        <span class="ana-kpi-icon">⚠️</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatAlarm">--</strong> <span class="ana-kpi-unit">次</span></div>
+                    <div class="ana-kpi-sub">告警占比 <strong id="anaStatAlarmRate">--%</strong> (3票: <span id="anaStatUnanimous">--</span> | 2票: <span id="anaStatMajority">--</span>)</div>
+                </div>
+
+                <div class="ana-kpi-card safe">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">孤立扰动门禁拦截</span>
+                        <span class="ana-kpi-icon">🛡️</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatShielded">--</strong> <span class="ana-kpi-unit">次</span></div>
+                    <div class="ana-kpi-sub">单模型误报拦截率 <strong id="anaStatShieldRate">--%</strong> (零误报门禁)</div>
+                </div>
+
+                <div class="ana-kpi-card normal">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">正常工况与启停放行</span>
+                        <span class="ana-kpi-icon">✅</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatSafe">--</strong> <span class="ana-kpi-unit">份</span></div>
+                    <div class="ana-kpi-sub">平稳底噪: <span id="anaStatNormal">--</span> | 启停机: <span id="anaStatStates">--</span></div>
+                </div>
+
+                <div class="ana-kpi-card clip">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">传感器幅值饱和</span>
+                        <span class="ana-kpi-icon">⚡</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatClipped">--</strong> <span class="ana-kpi-unit">次</span></div>
+                    <div class="ana-kpi-sub">硬件供电轨饱和截断拦截</div>
+                </div>
+
+                <div class="ana-kpi-card review">
+                    <div class="ana-kpi-header">
+                        <span class="ana-kpi-title">人工专家质检复核</span>
+                        <span class="ana-kpi-icon">✍️</span>
+                    </div>
+                    <div class="ana-kpi-value"><strong id="anaStatReviewed">--</strong> <span class="ana-kpi-unit">份</span></div>
+                    <div class="ana-kpi-sub">复核率 <strong id="anaStatReviewRate">--%</strong> | 真碰撞核准: <strong id="anaStatConfirmed">--</strong></div>
+                </div>
+            </div>
+
+            <!-- Charts Container (2x3 Grid of Visualizations) -->
+            <div class="ana-charts-grid">
+                <!-- Chart 1: 历史工况多维时间演变趋势图 (Full Width) -->
+                <div class="chart-box span-full">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">📈</span>
+                            <strong>历史工况多维时间演变趋势图</strong>
+                            <span class="chart-subtitle">按所选时间基准每日各类音频样本堆叠演变</span>
+                        </div>
+                        <div class="chart-legend-hint">可点击图例开关单个工况显示</div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 280px;">
+                        <canvas id="chartTrendCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 2: 7 大工况分类占比分布环形图 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">🍩</span>
+                            <strong>7 大工况分类占比分布</strong>
+                            <span class="chart-subtitle">全量样本类型多维占比分布</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 260px;">
+                        <canvas id="chartTypesCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 3: 24 小时全天候时段风险分布柱状图 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">⏱️</span>
+                            <strong>24 小时全天候时段风险分布</strong>
+                            <span class="chart-subtitle">碰撞高发时段与白夜班工况规律分析</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 260px;">
+                        <canvas id="chartHourlyCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 4: 3 大模型 (03K/03U/03R) 置信度与表决贡献对比 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">⚖️</span>
+                            <strong>3 大核心模型置信度与表决对比</strong>
+                            <span class="chart-subtitle">03K (Dasheng) / 03U (ECHOv2) / 03R (GRAM)</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 260px;">
+                        <canvas id="chartModelsCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 5: 人工专家质检复核与误报率分布 -->
+                <div class="chart-box">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">📋</span>
+                            <strong>人工专家质检复核分布</strong>
+                            <span class="chart-subtitle">复核闭环结论分布与真碰撞/误报核实</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 260px;">
+                        <canvas id="chartReviewsCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 6: 声学物理特征聚类矩阵散点图 (Full Width) -->
+                <div class="chart-box span-full">
+                    <div class="chart-box-header">
+                        <div class="chart-box-title">
+                            <span class="chart-title-icon">🌌</span>
+                            <strong>声学物理特征聚类空间 (RMS 有效值 vs 峰值幅值 Peak)</strong>
+                            <span class="chart-subtitle">揭示真实碰撞冲击脉冲、供电轨幅值饱和与正常平稳底噪的物理聚类分界</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas-container" style="height: 260px;">
+                        <canvas id="chartPhysicsCanvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-Dimensional Aggregation Summary Matrix Table -->
+            <div class="ana-matrix-section">
+                <div class="ana-matrix-header">
+                    <div class="chart-box-title">
+                        <span class="chart-title-icon">📊</span>
+                        <strong>七大工况多维综合统计矩阵报表</strong>
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="exportAnalyticsCSV()">
+                        📥 导出此表格 (CSV)
+                    </button>
+                </div>
+                <div class="table-scroll-wrapper" style="max-height: 400px;">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th>工况类别标识</th>
+                                <th>样本数量</th>
+                                <th>占比</th>
+                                <th>平均均值置信度</th>
+                                <th>平均峰值幅值</th>
+                                <th>平均有效值 RMS</th>
+                                <th>波峰因数</th>
+                                <th>已人工复核</th>
+                                <th>确诊真碰撞</th>
+                                <th>诊断结论与运维处置建议</th>
+                            </tr>
+                        </thead>
+                        <tbody id="anaMatrixTableBody">
+                            <tr>
+                                <td colspan="11" style="text-align:center;padding:30px;color:var(--text-muted)">正在聚合统计数据...</td>
+                            </tr>
+                        </tbody>
+                        <tfoot id="anaMatrixTableFoot" style="font-weight:700;background:#f8fafc;border-top:2px solid var(--border-color);">
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 1: 诊断记录与台账管理                                         -->
+        <!-- ================================================================= -->
+        <section id="tab-records" class="admin-tab-content active">
+            
+            <!-- Controls Bar -->
+            <div class="admin-toolbar">
+                <div class="toolbar-left" style="gap:14px;">
+                    <div class="search-input-box">
+                        <span>🔍</span>
+                        <input type="text" id="recordSearchInput" placeholder="搜索文件名、日期、关键词..." oninput="filterRecordsDebounced()">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <div class="filter-pills">
+                            <span style="font-size:11px;font-weight:700;color:var(--text-muted);display:flex;align-items:center;">决策:</span>
+                            <button class="admin-filter-pill active" onclick="setRecordConsensus('ALL', this)">全部</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('VOTE3', this)">🔴 全票确诊 (3票)</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('VOTE2', this)">🟠 多数表决 (2票)</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('SHIELDED', this)">🟡 孤立扰动 (1票)</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('NORMAL', this)">🟢 平稳底噪 (0票)</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('STARTUP', this)">🚀 现场启动</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('SHUTDOWN', this)">🛑 现场停机</button>
+                            <button class="admin-filter-pill" onclick="setRecordConsensus('CLIPPED', this)">🟣 幅值饱和</button>
+                        </div>
+                        <div class="filter-pills">
+                            <span style="font-size:11px;font-weight:700;color:var(--text-muted);display:flex;align-items:center;">复核:</span>
+                            <button class="admin-filter-pill active" onclick="setRecordReviewStatus('ALL', this)">全部</button>
+                            <button class="admin-filter-pill" onclick="setRecordReviewStatus('UNREVIEWED', this)">⏳ 待复核</button>
+                            <button class="admin-filter-pill" onclick="setRecordReviewStatus('REVIEWED', this)">✅ 已复核</button>
+                            <button class="admin-filter-pill" onclick="setRecordReviewStatus('CONFIRMED_COLLISION', this)">🔴 确诊真碰撞</button>
+                            <button class="admin-filter-pill" onclick="setRecordReviewStatus('CONFIRMED_FALSE_ALARM', this)">🟡 确认为误报</button>
+                            <button class="admin-filter-pill" onclick="setRecordReviewStatus('CONFIRMED_NORMAL', this)">🟢 确认正常</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn btn-outline" onclick="exportRecordsCSV()">
+                        📥 导出全部台账 (CSV)
+                    </button>
+                    <button class="btn btn-danger" onclick="confirmClearAllRecords()">
+                        🗑️ 清空所有记录
+                    </button>
+                </div>
+            </div>
+
+            <!-- Mini KPI Summary Bar -->
+            <div class="admin-summary-row">
+                <div class="summary-pill">总记录: <strong id="recStatTotal">0</strong> 份</div>
+                <div class="summary-pill crit">确诊告警: <strong id="recStatAlarm">0</strong> 份</div>
+                <div class="summary-pill safe">防误报门禁拦截: <strong id="recStatShielded">0</strong> 次</div>
+                <div class="summary-pill normal">正常底噪: <strong id="recStatNormal">0</strong> 份</div>
+                <div class="summary-pill clip">幅值饱和: <strong id="recStatClipped">0</strong> 份</div>
+            </div>
+
+            <!-- Records Table -->
+            <div class="table-scroll-wrapper" style="max-height: 580px;">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 45px;">#</th>
+                            <th>诊断时间</th>
+                            <th>音频文件名</th>
+                            <th>3模型票数</th>
+                            <th>均值置信度</th>
+                            <th>03K (Dasheng)</th>
+                            <th>03U (ECHOv2)</th>
+                            <th>03R (GRAM-Mono)</th>
+                            <th>峰值 / RMS</th>
+                            <th>仲裁结论</th>
+                            <th>人工复核结论</th>
+                            <th style="width: 260px; text-align: center;">管理操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminRecordsTableBody">
+                        <tr>
+                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted)">
+                                正在加载诊断记录列表...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination Bar -->
+            <div class="admin-pagination">
+                <div class="page-info">
+                    显示第 <span id="pageCurrent">1</span> 页 / 共 <span id="pageTotal">1</span> 页 (共 <span id="pageCount">0</span> 条)
+                </div>
+                <div class="page-buttons">
+                    <button class="btn btn-outline btn-sm" onclick="changeRecordPage(-1)">◀ 上一页</button>
+                    <button class="btn btn-outline btn-sm" onclick="changeRecordPage(1)">下一页 ▶</button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 2: 实时运行与系统日志                                         -->
+        <!-- ================================================================= -->
+        <section id="tab-logs" class="admin-tab-content">
+            
+            <div class="admin-toolbar">
+                <div class="toolbar-left">
+                    <div class="filter-pills">
+                        <button class="admin-filter-pill active" onclick="setLogLevel('ALL', this)">全部日志</button>
+                        <button class="admin-filter-pill" onclick="setLogLevel('INFO', this)">ℹ️ INFO 信息</button>
+                        <button class="admin-filter-pill" onclick="setLogLevel('WARN', this)">⚠️ WARN 警告</button>
+                        <button class="admin-filter-pill" onclick="setLogLevel('ERROR', this)">❌ ERROR 错误</button>
+                    </div>
+                    <div class="search-input-box" style="width: 240px;">
+                        <span>🔍</span>
+                        <input type="text" id="logSearchInput" placeholder="过滤日志内容..." oninput="fetchAdminLogs()">
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <label class="auto-refresh-toggle">
+                        <input type="checkbox" id="autoRefreshLogsCheck" checked onchange="toggleAutoRefreshLogs(this)">
+                        <span>实时自动刷新 (2s)</span>
+                    </label>
+                    <button class="btn btn-outline" onclick="fetchAdminLogs()">
+                        🔄 立即刷新
+                    </button>
+                    <a href="/api/admin/logs/download" class="btn btn-outline" style="text-decoration:none">
+                        📥 下载日志文件
+                    </a>
+                    <button class="btn btn-danger" onclick="confirmClearLogs()">
+                        🗑️ 清空运行日志
+                    </button>
+                </div>
+            </div>
+
+            <!-- Terminal Console Container -->
+            <div class="log-console-container">
+                <div class="log-console-head">
+                    <div class="console-title">
+                        <span class="dot-red"></span>
+                        <span class="dot-yellow"></span>
+                        <span class="dot-green"></span>
+                        <span style="margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: #64748b;">system_monitor.log (实时运行控制台)</span>
+                    </div>
+                    <span id="logCounterText" style="font-family: var(--font-mono); font-size: 11px; color: #64748b;">共 0 行日志</span>
+                </div>
+                <div class="log-console-body" id="logConsoleBody">
+                    <div class="log-loading">正在读取系统运行日志...</div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 3: 引擎配置与资源监控                                         -->
+        <!-- ================================================================= -->
+        <section id="tab-system" class="admin-tab-content">
+            
+            <!-- Host Hardware Metrics Grid -->
+            <div class="system-metrics-grid">
+                
+                <div class="metric-card">
+                    <div class="m-icon">🖥️</div>
+                    <div class="m-info">
+                        <span class="m-lbl">主机 CPU 负载</span>
+                        <span class="m-val" id="sysCpuVal">-- %</span>
+                        <span class="m-sub" id="sysCpuCores">-- 核心</span>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="m-icon">💾</div>
+                    <div class="m-info">
+                        <span class="m-lbl">系统内存占用</span>
+                        <span class="m-val" id="sysRamVal">-- %</span>
+                        <span class="m-sub" id="sysRamSub">-- / -- GB</span>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="m-icon">⚡</div>
+                    <div class="m-info">
+                        <span class="m-lbl">推理服务内存</span>
+                        <span class="m-val" id="sysProcMemVal">-- MB</span>
+                        <span class="m-sub">PyTorch 模型驻留</span>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="m-icon">📁</div>
+                    <div class="m-info">
+                        <span class="m-lbl">诊断归档磁盘占用</span>
+                        <span class="m-val" id="sysRecordsDiskVal">-- MB</span>
+                        <span class="m-sub" id="sysRecordsCount">共 -- 个文件</span>
+                    </div>
+                </div>
+
+                <div class="metric-card" style="border-left: 3px solid #10b981;">
+                    <div class="m-icon">🛡️</div>
+                    <div class="m-info">
+                        <span class="m-lbl">宿主机性能保护屏障</span>
+                        <span class="m-val" id="sysResourceLimitStatus" style="font-size:16px;color:#10b981;">已限制 50% 资源</span>
+                        <span class="m-sub" id="sysResourceLimitSub">CPU 4/8核 | 内存上限 16GB</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Configuration & Engine Parameters Form -->
+            <div class="config-layout-grid">
+                
+                <!-- Left: Live Config Form -->
+                <div class="config-form-card">
+                    <div class="card-head">
+                        <h3>⚙️ 核心仲裁门禁与目录配置</h3>
+                        <span class="head-tip">修改后立即热生效并持久化至 config.json</span>
+                    </div>
+                    
+                    <form id="configForm" onsubmit="saveSystemConfig(event)">
+                        
+                        <div class="form-group">
+                            <label for="cfgAlarmThresh">单模型严选告警置信度阈值 (%)</label>
+                            <input type="number" id="cfgAlarmThresh" step="0.5" min="50" max="99.9" value="90.0" required>
+                            <span class="field-hint">核心策略准则：单模型必须超过此高置信度门限才能投出 1 票，阻断弱噪声</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cfgScanInterval">待测目录自动扫描周期 (秒)</label>
+                            <input type="number" id="cfgScanInterval" step="0.5" min="0.5" max="30" value="1.0" required>
+                            <span class="field-hint">后台扫描 incoming_audio 发现新文件时的轮询时间间隔</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cfgWatchDir">📁 实时待测检测路径 (监听音频目录)</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="cfgWatchDir" placeholder="例如: incoming_audio 或 D:\scada_recordings" required style="flex:1;">
+                                <button type="button" class="btn btn-outline btn-sm" onclick="resetDefaultWatchDir()" title="恢复默认 incoming_audio 目录">恢复默认</button>
+                            </div>
+                            <span class="field-hint">
+                                后台自动轮询扫描待测音频（.bin / .wav）的目录。支持<strong>相对路径</strong>（如 <code>incoming_audio</code>）或宿主机任意<strong>绝对盘符路径</strong>（如 <code>D:\WindTurbine\AudioData</code>）。修改后即刻生效，无需重启。
+                            </span>
+                            <div id="cfgWatchDirResolved" style="font-size:11px; color:#2563eb; margin-top:3px; font-family:var(--font-mono);">
+                                当前实际物理路径: --
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cfgProcessedDir">🗄️ 处理完毕归档路径 (分析结果分类存储)</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="cfgProcessedDir" placeholder="例如: incoming_audio/processed 或 D:\scada_recordings\archived" style="flex:1;">
+                                <button type="button" class="btn btn-outline btn-sm" onclick="resetDefaultProcessedDir()" title="跟随检测目录下的 processed 文件夹">默认归档</button>
+                            </div>
+                            <span class="field-hint">
+                                检测完成后的音频自动按 7 种诊断工况分类保存的目录。支持相对或绝对路径；留空则默认在待测目录中创建 <code>processed</code> 子目录。
+                            </span>
+                            <div id="cfgProcessedDirResolved" style="font-size:11px; color:#64748b; margin-top:3px; font-family:var(--font-mono);">
+                                当前实际归档路径: --
+                            </div>
+                        </div>
+
+                        <!-- 宿主机 50% 性能保护与资源隔离调控屏障 -->
+                        <div class="resource-limit-panel">
+                            <div class="res-panel-head">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <strong style="font-size:13.5px; color:var(--text-main);">🛡️ 宿主机性能限制与实时调控面板 (50% 安全保护屏障)</strong>
+                                    <span class="status-pill status-ready" id="resLimitActiveBadge">● 保护生效中</span>
+                                </div>
+                                <label class="res-switch-label">
+                                    <input type="checkbox" id="cfgResourceLimitEnable" checked onchange="toggleResourceLimitEnable(this)">
+                                    <strong>启用宿主机硬件性能限制</strong>
+                                </label>
+                            </div>
+
+                            <!-- 实时资源配额与状态展示 -->
+                            <div class="res-status-grid">
+                                <div class="res-status-item">
+                                    <span class="res-status-lbl">CPU 算力上限配额</span>
+                                    <span class="res-status-val" id="dispMaxCpuPct">50%</span>
+                                    <span class="res-status-detail" id="dispCpuCores">绑定 4 / 8 核心</span>
+                                </div>
+                                <div class="res-status-item">
+                                    <span class="res-status-lbl">物理内存上限封顶</span>
+                                    <span class="res-status-val" id="dispMaxMemPct">50%</span>
+                                    <span class="res-status-detail" id="dispMaxMemGb">上限 16.0 GB</span>
+                                </div>
+                                <div class="res-status-item">
+                                    <span class="res-status-lbl">PyTorch 算力并发</span>
+                                    <span class="res-status-val" id="dispPyTorchThreads">4 线程</span>
+                                    <span class="res-status-detail">模型并行计算线程</span>
+                                </div>
+                                <div class="res-status-item">
+                                    <span class="res-status-lbl">进程调度优先级</span>
+                                    <span class="res-status-val" id="dispProcessPriority" style="font-size:13.5px;">BELOW_NORMAL</span>
+                                    <span class="res-status-detail">工控 SCADA 优先抢占</span>
+                                </div>
+                            </div>
+
+                            <!-- 实时动态调控滑块与预设 -->
+                            <div class="res-controls-box">
+                                <!-- CPU 调控 -->
+                                <div class="res-slider-group">
+                                    <div class="res-slider-header">
+                                        <label for="cfgMaxCpuPercent" style="font-size:12px; font-weight:700; color:var(--text-main);">
+                                            CPU 算力上限: <span id="valCpuSliderText" style="color:#2563eb; font-family:var(--font-mono); font-size:13px;">50%</span>
+                                        </label>
+                                        <div class="res-preset-pills">
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setCpuPreset(25)">25%</button>
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setCpuPreset(50)">50% (推荐)</button>
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setCpuPreset(75)">75%</button>
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setCpuPreset(100)">100%</button>
+                                        </div>
+                                    </div>
+                                    <input type="range" id="cfgMaxCpuPercent" min="10" max="100" step="5" value="50" class="res-slider" oninput="onCpuSliderInput(this.value)">
+                                    <span style="font-size:11px; color:var(--text-muted);">
+                                        动态绑定进程 CPU 亲和性核心，超出核心 100% 留给风电机组 SCADA 与 PLC 主控。
+                                    </span>
+                                </div>
+
+                                <!-- 内存调控 -->
+                                <div class="res-slider-group">
+                                    <div class="res-slider-header">
+                                        <label for="cfgMaxMemPercent" style="font-size:12px; font-weight:700; color:var(--text-main);">
+                                            物理内存上限: <span id="valMemSliderText" style="color:#2563eb; font-family:var(--font-mono); font-size:13px;">50%</span>
+                                        </label>
+                                        <div class="res-preset-pills">
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setMemPreset(30)">30%</button>
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setMemPreset(50)">50% (推荐)</button>
+                                            <button type="button" class="btn btn-outline btn-xs" onclick="setMemPreset(70)">70%</button>
+                                        </div>
+                                    </div>
+                                    <input type="range" id="cfgMaxMemPercent" min="20" max="90" step="5" value="50" class="res-slider" oninput="onMemSliderInput(this.value)">
+                                    <span style="font-size:11px; color:var(--text-muted);">
+                                        后台守护线程每 10 秒巡检，接近限额时自动触发深度 GC 与显存碎片清理。
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <label style="font-size:11.5px; font-weight:600; color:var(--text-main);">进程调度优先级:</label>
+                                    <select id="cfgProcessPriority" style="padding:4px 8px; font-size:11.5px; border:1px solid #cbd5e1; border-radius:4px;">
+                                        <option value="BELOW_NORMAL">低于正常 (BELOW_NORMAL - 推荐工控安全)</option>
+                                        <option value="IDLE">空闲后台 (IDLE - 极低占用)</option>
+                                        <option value="NORMAL">标准普通 (NORMAL - 无降权)</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="applyRealtimeResourceLimits()" style="border-color:#2563eb; color:#2563eb; font-weight:700;">
+                                    ⚡ 立即生效资源限制 (免重启)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; align-items: center;">
+                            <button type="submit" class="btn btn-primary">
+                                💾 保存全部配置
+                            </button>
+                            <button type="button" class="btn btn-danger" onclick="stopAlgorithmEngine()" id="btnStopEngineForm">
+                                ⏹️ 停止算法检测
+                            </button>
+                            <button type="button" class="btn btn-success" onclick="startAlgorithmEngine()" id="btnStartEngineForm" style="display:none;">
+                                ▶️ 启动算法检测
+                            </button>
+                            <button type="button" class="btn btn-warning" onclick="restartAlgorithmEngine()" id="btnRestartEngine">
+                                🔄 重启算法引擎
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Right: Model Architecture Cards -->
+                <div class="config-models-card">
+                    <div class="card-head">
+                        <h3>🚀 3 大核心基座模型就绪状态</h3>
+                    </div>
+                    
+                    <div class="model-info-list">
+                        
+                        <div class="m-item">
+                            <div class="m-item-head">
+                                <span class="m-badge">03R</span>
+                                <strong style="color:var(--text-main)">GRAM-Mono (86.0M)</strong>
+                                <span class="status-pill status-ready">● 已就绪</span>
+                            </div>
+                            <p class="m-desc">Reverb-Adaptive ViT 混响自适应架构 | 强风剪切与瞬态振动 0 误报 | 空腔多次反射杂散波抵御守门员</p>
+                        </div>
+
+                        <div class="m-item">
+                            <div class="m-item-head">
+                                <span class="m-badge">03K</span>
+                                <strong style="color:var(--text-main)">Dasheng-Base (89.0M)</strong>
+                                <span class="status-pill status-ready">● 已就绪</span>
+                            </div>
+                            <p class="m-desc">ViT Patch (64,4) 自监督表征 | 27.2 万小时预训练 | 对瞬态敲击脉冲高频冲击捕捉灵敏</p>
+                        </div>
+
+                        <div class="m-item">
+                            <div class="m-item-head">
+                                <span class="m-badge">03U</span>
+                                <strong style="color:var(--text-main)">ECHOv2 (82.0M)</strong>
+                                <span class="status-pill status-ready">● 已就绪</span>
+                            </div>
+                            <p class="m-desc">Band-Splitting 频带自监督声学异常检测 | 底噪中位数 0.01% (全场最低) | 稳态背景完全静默放行</p>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Bottom: System Control & Algorithm Restart Card -->
+                <div class="config-form-card" style="grid-column: 1 / -1; margin-top: 6px;">
+                    <div class="card-head">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <h3>⚡ 算法引擎与检测系统运行控制</h3>
+                            <span class="status-pill status-ready" id="algoStatusBadgeBottom">● 算法检测运行中 (RUNNING)</span>
+                        </div>
+                        <span class="head-tip">实时停止/启动检测，或一键热重载 Python 算法、CPD 变点门禁及模型权重</span>
+                    </div>
+                    <div style="padding: 10px 0;">
+                        <p style="font-size: 13px; color: var(--text-sub); line-height: 1.6; margin-bottom: 12px;">
+                            <strong>【算法停止/启动】</strong>：点击“停止算法检测”可立即切断 incoming_audio 自动监听流与音频诊断，停止硬件 CPU/内存计算，避免占用被部署设备任何算力；随时可点击“启动算法检测”秒级恢复监测。<br>
+                            <strong>【算法热重载】</strong>：当更新了算法代码（如 CPD 变点检测、硬件削顶滤波准则）或微调模型权重后，点击“立即重启算法引擎”可<strong>免重启服务进程，快速热重载整个检测系统</strong>。
+                        </p>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                            <button class="btn btn-danger" onclick="stopAlgorithmEngine()" id="btnStopEngineCard" style="padding: 8px 16px; font-size: 13px; font-weight: 700;">
+                                ⏹️ 停止算法检测 (暂停扫描与推理)
+                            </button>
+                            <button class="btn btn-success" onclick="startAlgorithmEngine()" id="btnStartEngineCard" style="display: none; padding: 8px 16px; font-size: 13px; font-weight: 700;">
+                                ▶️ 启动算法检测 (恢复实时流监测)
+                            </button>
+                            <button class="btn btn-warning" onclick="restartAlgorithmEngine()" id="btnRestartEngineMain" style="padding: 8px 16px; font-size: 13px; font-weight: 700;">
+                                🔄 立即重启算法引擎与检测系统 (热重载)
+                            </button>
+                            <button class="btn btn-outline" onclick="restartProcessCold()" id="btnRestartProcessMain" style="padding: 8px 14px; font-size: 12px;">
+                                🔌 完全重启服务进程 (冷重启)
+                            </button>
+                        </div>
+                        <div id="restartLoadingStatus" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: #fffbeb; border: 1px solid #fef3c7; color: #b45309; font-size: 12px; align-items: center; gap: 10px;">
+                            <span>⏳</span>
+                            <span id="restartLoadingText">正在重新加载算法模块与 3 大核心模型，重置常驻内存镜像，约需 8~12 秒，请稍候...</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Detail Raw JSON Modal -->
+    <div id="detailModal" class="modal" onclick="closeDetailModal()">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div class="modal-head">
+                <h3 id="modalDetailTitle">📋 诊断记录详情元数据</h3>
+                <span class="modal-x" onclick="closeDetailModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <pre id="modalJsonContent" class="json-pre"></pre>
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-outline" onclick="closeDetailModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="adminImageModal" class="modal" onclick="closeAdminImageModal()">
+        <span class="modal-close">&times;</span>
+        <img class="modal-content" id="adminModalImg">
+    </div>
+
+    <!-- Admin Review Modal -->
+    <div id="adminReviewModal" class="modal" onclick="closeAdminReviewModal()">
+        <div class="review-modal-box" onclick="event.stopPropagation()">
+            <div class="review-modal-head">
+                <h3>✍️ 管理端人工专家复核与仲裁</h3>
+                <button class="review-modal-close" onclick="closeAdminReviewModal()">&times;</button>
+            </div>
+            <div class="review-modal-body">
+                <div class="review-meta-card">
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">音频文件名:</span>
+                        <strong id="adminRevFilename" style="font-family:var(--font-mono);color:var(--text-main)">--</strong>
+                    </div>
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">诊断时间戳:</span>
+                        <span id="adminRevTime" style="font-family:var(--font-mono)">--</span>
+                    </div>
+                    <div class="review-meta-row">
+                        <span style="color:var(--text-muted)">模型协同仲裁:</span>
+                        <span id="adminRevConsensus">--</span>
+                    </div>
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">人工复核结论 (点击切换):</label>
+                    <div class="review-options-grid">
+                        <div class="review-option-card selected" id="admOpt-CONFIRMED_COLLISION" onclick="selectAdminReviewOption('CONFIRMED_COLLISION')">
+                            <div class="review-option-title" style="color:#dc2626">🔴 确认为真碰撞</div>
+                            <div class="review-option-desc">确诊现场发生真实机械结构碰擦或异常撞击</div>
+                        </div>
+                        <div class="review-option-card" id="admOpt-CONFIRMED_FALSE_ALARM" onclick="selectAdminReviewOption('CONFIRMED_FALSE_ALARM')">
+                            <div class="review-option-title" style="color:#d97706">🟡 确认为误报/扰动</div>
+                            <div class="review-option-desc">外界偶发环境异响、气流冲击或电磁杂音扰动</div>
+                        </div>
+                        <div class="review-option-card" id="admOpt-CONFIRMED_NORMAL" onclick="selectAdminReviewOption('CONFIRMED_NORMAL')">
+                            <div class="review-option-title" style="color:#16a34a">🟢 确认正常运转</div>
+                            <div class="review-option-desc">设备健康平稳运行，无任何异常振动碰撞</div>
+                        </div>
+                        <div class="review-option-card" id="admOpt-CONFIRMED_HARDWARE_FAULT" onclick="selectAdminReviewOption('CONFIRMED_HARDWARE_FAULT')">
+                            <div class="review-option-title" style="color:#9333ea">🟣 传感器/硬件故障</div>
+                            <div class="review-option-desc">采集通道电压死锁、饱和削顶或线路接触不良</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">复核专家 / 质检员姓名:</label>
+                    <input type="text" id="adminRevReviewer" class="review-input-field" placeholder="例如：现场总工 / 张工">
+                </div>
+
+                <div class="review-input-group">
+                    <label class="review-input-label">专家复核说明 / 勘验备注 (选填):</label>
+                    <textarea id="adminRevNotes" class="review-textarea-field" placeholder="记录现场确认细节，如：现场拆机检查叶片正常，确认为外部强杂音误触发..."></textarea>
+                </div>
+            </div>
+            <div class="review-modal-foot">
+                <button class="btn btn-outline" onclick="closeAdminReviewModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitAdminReviewAction()" id="btnAdminSubmitReview">💾 确认提交复核结论</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/chart.min.js"></script>
+    <script src="/static/js/admin.js?v=2.0"></script>
+</body>
+</html>

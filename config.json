@@ -1,0 +1,24 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8088
+  },
+  "monitor": {
+    "watch_dir": "incoming_audio",
+    "scan_interval_sec": 1.0,
+    "alarm_threshold_pct": 90.0,
+    "voting_mode": "STRICT_MAJORITY",
+    "min_majority_mean_pct": 85.0,
+    "auto_archive": false
+  },
+  "resource_limit": {
+    "enable": true,
+    "max_cpu_percent": 50,
+    "max_memory_percent": 50,
+    "process_priority": "BELOW_NORMAL"
+  },
+  "turbine_node": "172.16.80.10",
+  "code_base_dir": "P:\\01-work\\022-audio detect",
+  "field_record_dir": "P:\\BaiduSyncdisk\\sound record\\172.16.80.10",
+  "models": ["03K", "03U", "03R"]
+}
