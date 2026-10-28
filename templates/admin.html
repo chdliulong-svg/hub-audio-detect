@@ -550,7 +550,7 @@
                     <div class="m-icon">🏷️</div>
                     <div class="m-info">
                         <span class="m-lbl">系统版本与架构</span>
-                        <span class="m-val" id="sysVersionVal" style="font-size:16px;color:#4338ca;">{{ system_version }}</span>
+                        <span class="m-val" id="sysVersionVal" style="font-size:16px;color:#4338ca;">{{ system_version if system_version else 'v3.2.0' }}</span>
                         <span class="m-sub" id="sysVersionSub">生产级 WSGI (Waitress) + SQLite WAL</span>
                     </div>
                 </div>
@@ -934,7 +934,7 @@
         <div class="footer-content">
             <span>风电机组碰撞声学智能诊断系统 · 后台管理中心</span>
             <span class="footer-divider">|</span>
-            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version }}</strong></span>
+            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version if system_version else 'v3.2.0' }}</strong></span>
             <span class="footer-divider">|</span>
             <span>工业级边缘计算就绪 (Waitress WSGI + SQLite WAL)</span>
         </div>

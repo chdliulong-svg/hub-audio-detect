@@ -516,7 +516,7 @@
         <div class="footer-content">
             <span>风电机组碰撞声学智能诊断系统 · 3核心声学大模型 (03K + 03U + 03R) 协同投票架构</span>
             <span class="footer-divider">|</span>
-            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version }}</strong></span>
+            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version if system_version else 'v3.2.0' }}</strong></span>
             <span class="footer-divider">|</span>
             <span>工业级边缘计算就绪 (Waitress WSGI + SQLite WAL)</span>
         </div>
