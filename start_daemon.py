@@ -77,30 +77,23 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     daemon_log_path = os.path.join(log_dir, "daemon_console.log")
     
-    # 打开日志文件用于底层重定向，保证 Python 报错与 C++ 底层日志全量留存
-    try:
-        log_fp = open(daemon_log_path, "a", encoding="utf-8", buffering=1)
-    except Exception:
-        log_fp = open(os.devnull, "w", encoding="utf-8")
-
-    DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     CREATE_NO_WINDOW = 0x08000000
 
-    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    flags = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     print(f"[1/2] 正在创建后台脱离会话守护进程...")
     
     proc = None
-    # 优先使用 python.exe + CREATE_NO_WINDOW，这样具备真实的重定向管道且绝对无窗口
-    launcher_py = python_bin if os.path.exists(python_bin) else pythonw_bin
+    # 优先使用 pythonw.exe，零黑框且完全脱离控制台生命周期
+    launcher_py = pythonw_bin if os.path.exists(pythonw_bin) else python_bin
     try:
         proc = subprocess.Popen(
             [launcher_py, app_py],
             cwd=BASE_DIR,
-            stdout=log_fp,
-            stderr=subprocess.STDOUT,
-            creationflags=flags,
-            close_fds=True
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags
         )
     except Exception as e:
         print(f"[ERROR] 启动守护进程失败: {e}")
@@ -151,10 +144,14 @@ def main():
         print("[OK] 正在自动为您打开浏览器监控页面...")
         time.sleep(0.5)
         open_browser("http://127.0.0.1:8088")
+        time.sleep(0.5)
+        open_browser("http://127.0.0.1:8088/admin#tab-analytics")
     else:
         print(f"\n[!] 启动耗时较长 (已等待 {cost_s} 秒)，后台服务仍在加载中...")
         print("[!] 正在尝试为您打开浏览器...")
         open_browser("http://127.0.0.1:8088")
+        time.sleep(0.5)
+        open_browser("http://127.0.0.1:8088/admin#tab-analytics")
 
     print()
     print("=" * 70)

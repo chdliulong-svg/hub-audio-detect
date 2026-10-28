@@ -24,25 +24,55 @@ import traceback
 import torch
 from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, Response
 
-# 当使用 pythonw 后台静默运行时，sys.stdout 和 sys.stderr 默认为 None
-# 重定向至后台日志文件，防止静默运行异常丢日志或崩溃
+# 当在后台静默运行或控制台脱离时，提供防崩溃安全日志流
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if sys.stdout is None or sys.stderr is None:
-    try:
-        log_dir = os.path.join(APP_DIR, "records")
-        os.makedirs(log_dir, exist_ok=True)
-        daemon_log = open(os.path.join(log_dir, "daemon_console.log"), "a", encoding="utf-8", buffering=1)
-        if sys.stdout is None:
-            sys.stdout = daemon_log
-        if sys.stderr is None:
-            sys.stderr = daemon_log
-    except Exception:
-        if sys.stdout is None:
-            sys.stdout = open(os.devnull, "w", encoding="utf-8")
-        if sys.stderr is None:
-            sys.stderr = open(os.devnull, "w", encoding="utf-8")
-elif hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+log_dir = os.path.join(APP_DIR, "records")
+os.makedirs(log_dir, exist_ok=True)
+daemon_log_path = os.path.join(log_dir, "daemon_console.log")
+
+class SafeStreamWrapper:
+    """包装标准输出流，保证双写文件并防止父进程退出时管道破裂崩溃"""
+    def __init__(self, target_stream, log_file_path):
+        self.target = target_stream
+        self.log_file_path = log_file_path
+        self._fp = None
+
+    def _get_fp(self):
+        if self._fp is None and self.log_file_path:
+            try:
+                self._fp = open(self.log_file_path, "a", encoding="utf-8", buffering=1)
+            except Exception:
+                pass
+        return self._fp
+
+    def write(self, s):
+        if self.target and hasattr(self.target, "write"):
+            try:
+                self.target.write(s)
+            except Exception:
+                self.target = None
+        fp = self._get_fp()
+        if fp:
+            try:
+                fp.write(s)
+            except Exception:
+                pass
+
+    def flush(self):
+        if self.target and hasattr(self.target, "flush"):
+            try:
+                self.target.flush()
+            except Exception:
+                self.target = None
+        fp = self._get_fp()
+        if fp:
+            try:
+                fp.flush()
+            except Exception:
+                pass
+
+sys.stdout = SafeStreamWrapper(sys.stdout, daemon_log_path)
+sys.stderr = SafeStreamWrapper(sys.stderr, daemon_log_path)
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 
 # 读取配置
