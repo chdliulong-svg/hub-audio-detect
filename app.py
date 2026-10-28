@@ -1558,6 +1558,35 @@ def api_admin_restart_service():
     threading.Thread(target=do_cold_restart, daemon=True).start()
     return jsonify({"success": True, "msg": "服务进程正在执行完整冷重启，页面将在 15 秒后自动刷新..."})
 
+@app.route("/api/admin/check_update", methods=["GET"])
+def api_admin_check_update():
+    """检测 GitHub 远程仓库是否有新版本"""
+    try:
+        import auto_update
+        res = auto_update.check_for_updates()
+        return jsonify({"success": True, "data": res})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"检查更新失败: {e}"}), 500
+
+@app.route("/api/admin/apply_update", methods=["POST"])
+def api_admin_apply_update():
+    """触发系统在线热更新 (拉取最新代码并重启)"""
+    try:
+        add_log("WARN", "【系统更新】管理员在 Web 后台触发在线自动升级流程...")
+        def do_update():
+            time.sleep(1.0)
+            python = sys.executable
+            updater_py = os.path.join(APP_DIR, "auto_update.py")
+            import subprocess
+            # 使用 CREATE_NEW_CONSOLE 独立脱离进程执行更新
+            CREATE_NEW_CONSOLE = 0x00000010
+            subprocess.Popen([python, updater_py, "--apply"], creationflags=CREATE_NEW_CONSOLE)
+            os._exit(0)
+        threading.Thread(target=do_update, daemon=True).start()
+        return jsonify({"success": True, "msg": "系统已启动自动升级子进程，正在拉取最新代码并验证依赖，完成后将自动重启服务！"})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"触发更新失败: {e}"}), 500
+
 # ---------------------------------------------------------------------------
 # 主程序入口
 # ---------------------------------------------------------------------------

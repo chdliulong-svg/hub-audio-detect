@@ -747,6 +747,60 @@
                     </div>
                 </div>
 
+                <!-- Bottom 2: System Auto-Update & Version Maintenance Card -->
+                <div class="config-form-card" style="grid-column: 1 / -1; margin-top: 14px; border-left: 3px solid #2563eb;">
+                    <div class="card-head">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <h3>🔄 系统在线自动更新与版本维护</h3>
+                            <span class="status-pill status-ready" id="updateStatusBadge">● 检查就绪</span>
+                        </div>
+                        <span class="head-tip">直连 GitHub 主线仓库 (hub-audio-detect) · 一键拉取最新代码/依赖/权重并平滑重启</span>
+                    </div>
+                    <div style="padding: 10px 0;">
+                        <!-- Version Stats Grid -->
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px;">
+                            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">当前本地部署版本 (Local HEAD)</span>
+                                <strong id="updateLocalSha" style="font-family:var(--font-mono); font-size:13.5px; color:var(--text-main);">检测中...</strong>
+                                <div id="updateLocalMsg" style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</div>
+                            </div>
+                            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">GitHub 远程主线版本 (Remote main)</span>
+                                <strong id="updateRemoteSha" style="font-family:var(--font-mono); font-size:13.5px; color:#2563eb;">未检查</strong>
+                                <div id="updateRemoteMsg" style="font-size:11px; color:#64748b; margin-top:2px;">点击下方按钮联网检查</div>
+                            </div>
+                            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+                                <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">部署机更新渠道支持</span>
+                                <span style="font-size:12px; color:#10b981; font-weight:600; display:block;">Web后台 / 批处理 / Windows计划任务</span>
+                                <div style="font-size:11px; color:#64748b; margin-top:2px;">支持夜间无人值守静默自动更新</div>
+                            </div>
+                        </div>
+
+                        <!-- Diff / Changelog preview -->
+                        <div id="updateDiffBox" style="display:none; margin-bottom:14px; padding:12px 14px; background:#fffbeb; border:1px solid #fef3c7; border-radius:6px; font-size:12px; color:#92400e; font-family:var(--font-mono); line-height:1.6; white-space:pre-wrap; max-height:160px; overflow-y:auto;">
+                        </div>
+
+                        <!-- Update in progress banner -->
+                        <div id="updateProgressBox" style="display:none; margin-bottom:14px; padding:12px 14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:12.5px; color:#1e40af; align-items:center; gap:10px;">
+                            <span>🚀</span>
+                            <span id="updateProgressText">升级进程已在后台独立启动，正在拉取最新代码、检查依赖环境并重启服务，页面将在 25 秒后自动刷新...</span>
+                        </div>
+
+                        <!-- Control Buttons -->
+                        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                            <button type="button" class="btn btn-outline" onclick="checkSystemUpdate()" id="btnCheckUpdate" style="padding:8px 16px; font-size:13px; font-weight:600;">
+                                🔍 检查远程最新版本
+                            </button>
+                            <button type="button" class="btn btn-primary" onclick="applySystemUpdate()" id="btnApplyUpdate" style="padding:8px 18px; font-size:13px; font-weight:700;">
+                                🚀 立即在线升级并热重启
+                            </button>
+                            <span style="font-size:11.5px; color:var(--text-muted); margin-left:4px;">
+                                提示：亦可双击目录中的 <code>5_一键在线更新系统.bat</code> 或运行 <code>开启每日自动更新计划任务.bat</code> 进行自动升级。
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
         </section>

@@ -72,6 +72,7 @@ function switchAdminTab(tabName, btn) {
         fetchAdminLogs();
     } else if (tabName === 'system') {
         fetchSystemStatus();
+        checkSystemUpdate(true);
     }
 }
 
@@ -883,6 +884,168 @@ async function restartProcessCold() {
         setTimeout(() => {
             location.reload();
         }, 15000);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 系统版本与在线自动升级 (System Auto-Update & Version Maintenance)
+// ---------------------------------------------------------------------------
+let isCheckingUpdate = false;
+
+async function checkSystemUpdate(isSilent = false) {
+    if (isCheckingUpdate) return;
+    isCheckingUpdate = true;
+
+    const btn = document.getElementById('btnCheckUpdate');
+    const badge = document.getElementById('updateStatusBadge');
+    const localShaEl = document.getElementById('updateLocalSha');
+    const localMsgEl = document.getElementById('updateLocalMsg');
+    const remoteShaEl = document.getElementById('updateRemoteSha');
+    const remoteMsgEl = document.getElementById('updateRemoteMsg');
+    const diffBox = document.getElementById('updateDiffBox');
+    const btnApply = document.getElementById('btnApplyUpdate');
+
+    if (btn && !isSilent) {
+        btn.disabled = true;
+        btn.innerText = '🔍 正在联网查询...';
+    }
+    if (badge) {
+        badge.className = 'status-pill';
+        badge.style.background = '#eff6ff';
+        badge.style.color = '#2563eb';
+        badge.innerText = '● 正在检查远程版本...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/check_update');
+        const json = await res.json();
+        if (json.success && json.data) {
+            const d = json.data;
+            if (localShaEl) localShaEl.innerText = d.local_commit || '未知';
+            if (localMsgEl) localMsgEl.innerText = d.local_msg || '';
+
+            if (d.error) {
+                if (badge) {
+                    badge.className = 'status-pill';
+                    badge.style.background = '#fef2f2';
+                    badge.style.color = '#dc2626';
+                    badge.innerText = '● 检查失败';
+                }
+                if (remoteMsgEl) remoteMsgEl.innerText = d.error;
+                if (!isSilent) alert('检查更新失败: ' + d.error);
+                return;
+            }
+
+            if (remoteShaEl) remoteShaEl.innerText = d.remote_commit || '未知';
+
+            if (d.has_update) {
+                if (badge) {
+                    badge.className = 'status-pill';
+                    badge.style.background = '#fffbeb';
+                    badge.style.color = '#d97706';
+                    badge.innerText = `● 发现新版本 (落后 ${d.commits_behind} 个提交)`;
+                }
+                if (remoteMsgEl) remoteMsgEl.innerText = `远程包含 ${d.commits_behind} 个新提交，可立即升级`;
+                if (diffBox) {
+                    diffBox.style.display = 'block';
+                    const changelogText = (d.changelog && d.changelog.length > 0)
+                        ? '【更新日志预览】\n' + d.changelog.join('\n')
+                        : '【更新日志预览】\n检测到远程仓库存在新版本代码提交。';
+                    diffBox.innerText = changelogText;
+                }
+                if (btnApply) {
+                    btnApply.disabled = false;
+                    btnApply.style.opacity = '1';
+                    btnApply.innerText = '🚀 立即在线升级并热重启';
+                }
+            } else {
+                if (badge) {
+                    badge.className = 'status-pill status-ready';
+                    badge.style.background = '#ecfdf5';
+                    badge.style.color = '#059669';
+                    badge.innerText = '● 已是最新版本';
+                }
+                if (remoteMsgEl) remoteMsgEl.innerText = '当前代码与 GitHub 远程主线完全一致';
+                if (diffBox) {
+                    diffBox.style.display = 'none';
+                }
+                if (btnApply) {
+                    btnApply.disabled = true;
+                    btnApply.style.opacity = '0.6';
+                    btnApply.innerText = '✅ 当前已是最新版本';
+                }
+            }
+        } else {
+            const errMsg = json.error || '检查接口返回异常';
+            if (badge) {
+                badge.className = 'status-pill';
+                badge.style.background = '#fef2f2';
+                badge.style.color = '#dc2626';
+                badge.innerText = '● 检查失败';
+            }
+            if (!isSilent) alert('检查更新失败: ' + errMsg);
+        }
+    } catch (err) {
+        if (!isSilent) alert('联网请求异常: ' + err);
+    } finally {
+        isCheckingUpdate = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '🔍 检查远程最新版本';
+        }
+    }
+}
+
+async function applySystemUpdate() {
+    if (!confirm('确定立即升级系统吗？\n\n系统将自动执行：\n1. 从 GitHub 仓库拉取最新代码 (git pull)\n2. 校验并安装更新依赖库 (requirements.txt)\n3. 校验并自动补全核心基础模型权重 (download_weights.py)\n4. 自动平滑热重启后台守护监控进程\n\n升级过程约持续 15~30 秒，期间监控服务将短暂重置。')) {
+        return;
+    }
+
+    const btnApply = document.getElementById('btnApplyUpdate');
+    const btnCheck = document.getElementById('btnCheckUpdate');
+    const progressBox = document.getElementById('updateProgressBox');
+    const progressText = document.getElementById('updateProgressText');
+
+    if (btnApply) { btnApply.disabled = true; btnApply.innerText = '⏳ 正在触发在线升级...'; }
+    if (btnCheck) { btnCheck.disabled = true; }
+    if (progressBox) { progressBox.style.display = 'flex'; }
+
+    try {
+        const res = await fetch('/api/admin/apply_update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const json = await res.json();
+        if (json.success) {
+            let countdown = 25;
+            const timer = setInterval(() => {
+                countdown--;
+                if (progressText) {
+                    progressText.innerText = `升级进程正在后台执行代码拉取与依赖验证，服务即将自动重启... 页面将在 ${countdown} 秒后自动刷新。`;
+                }
+                if (countdown <= 0) {
+                    clearInterval(timer);
+                    location.reload();
+                }
+            }, 1000);
+        } else {
+            alert('❌ 触发更新失败: ' + (json.error || '未知错误'));
+            if (btnApply) { btnApply.disabled = false; btnApply.innerText = '🚀 立即在线升级并热重启'; }
+            if (btnCheck) { btnCheck.disabled = false; }
+            if (progressBox) { progressBox.style.display = 'none'; }
+        }
+    } catch (err) {
+        let countdown = 20;
+        const timer = setInterval(() => {
+            countdown--;
+            if (progressText) {
+                progressText.innerText = `更新指令已成功送达，后台正重启服务... 页面将在 ${countdown} 秒后自动刷新。`;
+            }
+            if (countdown <= 0) {
+                clearInterval(timer);
+                location.reload();
+            }
+        }, 1000);
     }
 }
 
