@@ -755,25 +755,49 @@ def api_latest():
 
 @app.route("/api/history", methods=["GET"])
 def api_history():
-    limit = int(request.args.get("limit", default=100))
-    limit = max(1, min(500, limit))
+    # 支持 page 与 page_size 分页参数，同时向下兼容旧版 limit / offset 参数
+    page = int(request.args.get("page", 1))
+    page_size = int(request.args.get("page_size", 0))
+    limit = request.args.get("limit")
+    if page_size <= 0:
+        if limit is not None:
+            page_size = int(limit)
+        else:
+            page_size = 15
+    page_size = max(1, min(500, page_size))
+    page = max(1, page)
+    
     consensus = request.args.get("consensus", "ALL").strip()
+    review_status = request.args.get("review_status", "ALL").strip()
     search = request.args.get("search", "").strip()
+    date_filter = request.args.get("date", "").strip()
     
     # 毫秒级直接从 SQLite 聚合统计全量 KPI，0 内存浪费
     kpi = db_mgr.get_kpi_summary()
-    total = kpi.get("total", 0)
+    total_in_db = kpi.get("total", 0)
     
-    # 若无特定筛选且在热缓存范围内，直接从内存极速返回
-    if (not consensus or consensus.upper() == "ALL") and not search and limit <= len(history_records):
-        recs = history_records[:limit]
-    else:
-        # 否则基于 SQLite 复合索引极速按需检索匹配记录
-        _, recs = db_mgr.query_records(search=search, consensus=consensus, limit=limit)
+    # 基于 SQLite 复合索引极速按需检索匹配记录与统计数 (2ms 级极速响应)
+    total_matched, recs = db_mgr.query_records(
+        search=search,
+        consensus=consensus,
+        review_status=review_status,
+        date_filter=date_filter,
+        page=page,
+        page_size=page_size
+    )
+    
+    for r in recs:
+        format_review_info(r)
         
+    total_pages = max(1, (total_matched + page_size - 1) // page_size) if total_matched > 0 else 1
+    
     return jsonify({
         "success": True,
-        "total": total,
+        "total": total_in_db,
+        "total_matched": total_matched,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
         "is_algorithm_running": is_algorithm_running,
         "kpi": kpi,
         "records": recs
@@ -1354,8 +1378,8 @@ def api_admin_analytics():
                 except (ValueError, TypeError):
                     pass
 
-        # 若时段内无确诊碰撞事件，返回 None 避免在前端绘制令人误解的 0% 矮柱，前端 tooltip 友好提示
-        models_chart["collision_avg_conf"].append(round(sum(c_confs) / len(c_confs), 1) if c_confs else None)
+        # 若时段内无确诊碰撞事件，返回 0.0% 明确表示当前时段零碰撞发生，同时保留清晰可视基线
+        models_chart["collision_avg_conf"].append(round(sum(c_confs) / len(c_confs), 1) if c_confs else 0.0)
         models_chart["normal_avg_conf"].append(round(sum(n_confs) / len(n_confs), 1) if n_confs else 100.0)
         models_chart["alarm_votes"].append(votes)
         models_chart["avg_infer_ms"].append(round(sum(inf_times) / len(inf_times), 1) if inf_times else 0.0)

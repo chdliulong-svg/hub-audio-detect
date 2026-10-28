@@ -1440,21 +1440,59 @@ function renderModelsChart(models) {
 
     const hasCollision = Boolean(models.has_collision || (models.collision_avg_conf && models.collision_avg_conf.some(v => v !== null && v > 0)));
     const maxVotes = models.alarm_votes && models.alarm_votes.length ? Math.max(...models.alarm_votes) : 0;
+    const avgNormal = models.normal_avg_conf && models.normal_avg_conf.length ? (models.normal_avg_conf.reduce((a, b) => a + b, 0) / models.normal_avg_conf.length).toFixed(1) : '99.5';
 
     // 动态同步卡片小标题状态徽章
     const subtitleEl = canvas.closest('.chart-box')?.querySelector('.chart-subtitle');
     if (subtitleEl) {
         const baseTitle = '03K (Dasheng) / 03U (ECHOv2) / 03R (GRAM)';
         if (!hasCollision) {
-            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#ecfdf5;color:#059669;font-size:11px;font-weight:600;">🛡️ 全量底噪高置信放行 (0 告警)</span>`;
+            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#ecfdf5;color:#059669;font-size:11px;font-weight:600;">🛡️ 全量底噪高置信放行 · 零碰撞告警 (底噪均值 ${avgNormal}% | 碰撞 0% | 告警 0票)</span>`;
         } else {
-            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:600;">⚠️ 包含确诊碰撞事件对比</span>`;
+            const maxColl = Math.round(Math.max(...models.collision_avg_conf));
+            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:600;">⚠️ 包含确诊碰撞事件对比 (碰撞均值 ${maxColl}% | 告警表决 ${maxVotes} 票)</span>`;
         }
     }
+
+    // 柱状图顶部数值直观标注插件 (避免 0% 或 0票 被误解为数据未加载)
+    const barValueLabelsPlugin = {
+        id: 'barValueLabels',
+        afterDatasetsDraw(chart) {
+            const ctx = chart.ctx;
+            chart.data.datasets.forEach((dataset, datasetIndex) => {
+                const meta = chart.getDatasetMeta(datasetIndex);
+                if (!meta.hidden) {
+                    meta.data.forEach((element, index) => {
+                        const rawVal = dataset.data[index];
+                        if (rawVal === undefined || rawVal === null) return;
+
+                        let labelText = '';
+                        if (datasetIndex === 0) {
+                            labelText = (hasCollision && rawVal > 0) ? `${rawVal}%` : '0%';
+                        } else if (datasetIndex === 1) {
+                            labelText = `${rawVal}%`;
+                        } else if (datasetIndex === 2) {
+                            labelText = `${rawVal}票`;
+                        }
+
+                        ctx.save();
+                        ctx.font = 'bold 10px Inter, sans-serif';
+                        ctx.fillStyle = dataset.backgroundColor;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        const yPos = Math.max(16, element.y - 3);
+                        ctx.fillText(labelText, element.x, yPos);
+                        ctx.restore();
+                    });
+                }
+            });
+        }
+    };
 
     const ctx = canvas.getContext('2d');
     chartModelsInstance = new Chart(ctx, {
         type: 'bar',
+        plugins: [barValueLabelsPlugin],
         data: {
             labels: models.labels || [],
             datasets: [
@@ -1463,6 +1501,7 @@ function renderModelsChart(models) {
                     data: models.collision_avg_conf || [],
                     backgroundColor: '#ef4444',
                     borderRadius: 4,
+                    minBarLength: 5,
                     yAxisID: 'y'
                 },
                 {
@@ -1470,6 +1509,7 @@ function renderModelsChart(models) {
                     data: models.normal_avg_conf || [],
                     backgroundColor: '#10b981',
                     borderRadius: 4,
+                    minBarLength: 5,
                     yAxisID: 'y'
                 },
                 {
@@ -1477,6 +1517,7 @@ function renderModelsChart(models) {
                     data: models.alarm_votes || [],
                     backgroundColor: '#3b82f6',
                     borderRadius: 4,
+                    minBarLength: 5,
                     yAxisID: 'y1'
                 }
             ]
@@ -1502,13 +1543,16 @@ function renderModelsChart(models) {
                             const dsLabel = context.dataset.label || '';
                             const val = context.raw;
                             if (dsLabel.includes('碰撞均值置信度')) {
-                                if (val === null || val === undefined) {
-                                    return `${dsLabel}: 时段内无确诊碰撞 (0起)`;
+                                if (!hasCollision || val === 0 || val === null || val === undefined) {
+                                    return `${dsLabel}: 0.0% (当前时段机组运行平稳，0起结构碰撞)`;
                                 }
-                                return `${dsLabel}: ${val}%`;
+                                return `${dsLabel}: ${val}% (结构碰撞确诊置信度)`;
                             }
                             if (dsLabel.includes('底噪均值置信度')) {
-                                return `${dsLabel}: ${val}% (高确信平稳正常)`;
+                                return `${dsLabel}: ${val}% (高确信平稳正常底噪)`;
+                            }
+                            if (val === 0) {
+                                return `${dsLabel}: 0 票 (三模型全票静默放行，零误报)`;
                             }
                             return `${dsLabel}: ${val} 票`;
                         },
@@ -1537,18 +1581,18 @@ function renderModelsChart(models) {
                     type: 'linear',
                     position: 'left',
                     beginAtZero: true,
-                    max: 100,
+                    max: 105,
                     grid: { color: CHART_DEFAULTS.gridColor },
                     ticks: { color: CHART_DEFAULTS.tickColor, callback: val => val + '%' }
                 },
                 y1: {
                     type: 'linear',
                     position: 'right',
-                    display: maxVotes > 0, // 仅当真实产生了告警票数时才显示右侧 Y 轴，无票时彻底隐藏右侧 0~1 孤立刻度
+                    display: true,
                     beginAtZero: true,
                     suggestedMax: Math.max(10, maxVotes * 1.2),
                     grid: { drawOnChartArea: false },
-                    ticks: { color: '#3b82f6', precision: 0 }
+                    ticks: { color: '#3b82f6', precision: 0, callback: val => val + ' 票' }
                 }
             }
         }

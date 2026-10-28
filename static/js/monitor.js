@@ -9,6 +9,8 @@ let currentSearchQuery = '';
 let lastSeenFilename = '';
 
 // 历史记录表格分页控制器状态
+let totalHistoryRecords = 0;
+let totalHistoryPages = 1;
 let currentHistoryPage = 1;
 let historyPageSize = 15;
 
@@ -54,7 +56,10 @@ async function fetchLatestTelemetry() {
         if (data && data.success && data.filename !== lastSeenFilename) {
             lastSeenFilename = data.filename;
             updateHeroView(data);
-            fetchHistory();
+            // 仅在用户位于第 1 页且未开启筛选搜索时，静默刷新表格首屏
+            if (currentHistoryPage === 1 && currentFilter === 'all' && currentConsensusFilter === 'ALL' && !currentSearchQuery) {
+                fetchHistory(1);
+            }
         }
     } catch (e) {
         console.error('Fetch latest error:', e);
@@ -75,13 +80,70 @@ function updateSystemRunningStatus(isRunning) {
     }
 }
 
-async function fetchHistory() {
+async function fetchHistory(targetPage) {
+    if (targetPage !== undefined) {
+        currentHistoryPage = parseInt(targetPage, 10) || 1;
+    }
+
+    // 映射工况与复核状态参数给后端 SQLite 极速索引检索
+    let consensusParam = 'ALL';
+    let reviewParam = 'ALL';
+
+    if (currentConsensusFilter && currentConsensusFilter !== 'ALL') {
+        consensusParam = currentConsensusFilter;
+    } else if (currentFilter && currentFilter !== 'all') {
+        const filterMap = {
+            'vote3': 'VOTE3',
+            'vote2': 'VOTE2',
+            'vote1': 'VOTE1',
+            'shielded': 'VOTE1',
+            'vote0': 'VOTE0',
+            'normal': 'VOTE0',
+            'alarms': 'ALARMS',
+            'startup': 'STARTUP',
+            'shutdown': 'SHUTDOWN'
+        };
+        if (filterMap[currentFilter]) {
+            consensusParam = filterMap[currentFilter];
+        } else if (currentFilter === 'unreviewed') {
+            reviewParam = 'UNREVIEWED';
+        } else if (currentFilter === 'reviewed') {
+            reviewParam = 'REVIEWED';
+        }
+    }
+
+    const queryParams = new URLSearchParams({
+        page: currentHistoryPage,
+        page_size: historyPageSize,
+        consensus: consensusParam,
+        review_status: reviewParam,
+        search: currentSearchQuery || ''
+    });
+
     try {
-        const res = await fetch('/api/history?limit=100');
+        const res = await fetch(`/api/history?${queryParams.toString()}`);
         const data = await res.json();
         if (data && data.success) {
-            historyRecords = data.records || [];
-            updateKPICounters(data.kpi || historyRecords);
+            totalHistoryRecords = (data.total_matched !== undefined) ? data.total_matched : (data.total || 0);
+            totalHistoryPages = data.total_pages || Math.max(1, Math.ceil(totalHistoryRecords / historyPageSize));
+            currentFilteredRecords = data.records || [];
+
+            // 保持首屏热数据同步，以便模态框或顶栏兜底检索
+            if (currentHistoryPage === 1 && consensusParam === 'ALL' && reviewParam === 'ALL' && !currentSearchQuery) {
+                historyRecords = currentFilteredRecords;
+            }
+
+            if (data.kpi) {
+                updateKPICounters(data.kpi);
+            }
+
+            // 联动更新主表格分类横幅数量
+            const banner = document.getElementById('kpiTabActiveBanner');
+            if (banner && banner.style.display !== 'none') {
+                const countEl = document.getElementById('tabBannerCount');
+                if (countEl) countEl.innerText = `${totalHistoryRecords} 份文件`;
+            }
+
             renderHistoryTable();
         }
     } catch (e) {
@@ -269,78 +331,33 @@ function updateHeroView(data) {
 // ---------------------------------------------------------------------------
 function renderHistoryTable() {
     const tbody = document.getElementById('historyTableBody');
-    currentFilteredRecords = historyRecords.filter(r => {
-        // 0. 工况下拉选择器筛选 (如选择 NORMAL_CLEAN_NOISE)
-        if (currentConsensusFilter && currentConsensusFilter !== 'ALL') {
-            if (r.consensus_level !== currentConsensusFilter) {
-                return false;
-            }
-        }
+    if (!tbody) return;
 
-        // 1. 状态筛选 (精确支持 3票、2票、1票、0票 四个分类)
-        if (currentFilter === 'vote3' && r.alarm_votes !== 3 && r.consensus_level !== 'CRITICAL_COLLISION_UNANIMOUS') return false;
-        if (currentFilter === 'vote2' && r.alarm_votes !== 2 && r.consensus_level !== 'MAJORITY_COLLISION_ALARM') return false;
-        if ((currentFilter === 'vote1' || currentFilter === 'shielded') && r.alarm_votes !== 1 && r.consensus_level !== 'ISOLATED_DISTURBANCE_SAFE') return false;
-        if ((currentFilter === 'vote0' || currentFilter === 'normal') && r.alarm_votes !== 0 && r.consensus_level !== 'NORMAL_CLEAN_NOISE') return false;
-        if (currentFilter === 'alarms' && !r.is_alarm) return false;
-        if (currentFilter === 'startup' && r.consensus_level !== 'MACHINE_STARTUP_SAFE' && (!r.review || r.review.status !== 'CONFIRMED_STARTUP')) return false;
-        if (currentFilter === 'shutdown' && r.consensus_level !== 'MACHINE_SHUTDOWN_SAFE' && (!r.review || r.review.status !== 'CONFIRMED_SHUTDOWN')) return false;
-        if (currentFilter === 'unreviewed' && (r.review && r.review.status !== 'UNREVIEWED')) return false;
-        if (currentFilter === 'reviewed' && (!r.review || r.review.status === 'UNREVIEWED')) return false;
-
-        // 2. 通用关键词搜索过滤 (支持文件名、时间戳/日期、仲裁结论、复核结论、复核人、勘验评语等)
-        if (currentSearchQuery) {
-            const q = currentSearchQuery;
-            const qNoHyphen = q.replace(/[-\s_]/g, '');
-
-            const fn = (r.filename || '').toLowerCase();
-            const ts = (r.timestamp || '').toLowerCase();
-            const level = (r.consensus_level || '').toLowerCase();
-            const title = (r.consensus_title || '').toLowerCase();
-            const rev = r.review || {};
-            const revStatus = (rev.status_text || '').toLowerCase();
-            const reviewer = (rev.reviewer || '').toLowerCase();
-            const notes = (rev.notes || '').toLowerCase();
-
-            const hitFn = fn.includes(q) || (qNoHyphen && fn.replace(/[-\s_]/g, '').includes(qNoHyphen));
-            const hitTs = ts.includes(q) || (qNoHyphen && ts.replace(/[-\s_]/g, '').includes(qNoHyphen));
-            const hitLevel = level.includes(q) || title.includes(q);
-            const hitRev = revStatus.includes(q) || reviewer.includes(q) || notes.includes(q);
-
-            if (!hitFn && !hitTs && !hitLevel && !hitRev) {
-                return false;
-            }
-        }
-
-        return true;
-    });
-
-    const totalCount = currentFilteredRecords.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
-    
     // 页面边界校验
-    if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
+    if (currentHistoryPage > totalHistoryPages) currentHistoryPage = totalHistoryPages;
     if (currentHistoryPage < 1) currentHistoryPage = 1;
 
     const startIdx = (currentHistoryPage - 1) * historyPageSize;
-    const endIdx = Math.min(totalCount, startIdx + historyPageSize);
-    const pageRecords = currentFilteredRecords.slice(startIdx, endIdx);
+    const endIdx = startIdx + currentFilteredRecords.length;
 
     const searchTip = currentSearchQuery ? ` (搜索: "${currentSearchQuery}")` : '';
-    document.getElementById('historyCount').innerText = `共 ${totalCount} 条记录${searchTip}`;
+    const countEl = document.getElementById('historyCount');
+    if (countEl) {
+        countEl.innerText = `共 ${totalHistoryRecords} 条记录${searchTip}`;
+    }
 
     // 实时更新分页控件状态
-    updateHistoryPaginationUI(totalCount, totalPages, startIdx, endIdx);
+    updateHistoryPaginationUI(totalHistoryRecords, totalHistoryPages, startIdx, endIdx);
 
-    if (totalCount === 0) {
+    if (currentFilteredRecords.length === 0) {
         tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px">无匹配记录${currentSearchQuery ? ' (未找到包含关键词的诊断事件)' : ''}</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = pageRecords.map((r, i) => {
+    tbody.innerHTML = currentFilteredRecords.map((r, i) => {
         const globalIdx = startIdx + i;
         const itemKey = `${r.filename}_${r.timestamp}`;
-        const isCurrentActive = isPlaybackMode && (itemKey === currentPlaybackKey);
+        const isCurrentActive = isPlaybackMode && (itemKey === currentPlaybackKey || r.filename === currentPlaybackKey);
         const rowClass = isCurrentActive ? 'class="active-replay-row"' : '';
         const rev = r.review || { status: 'UNREVIEWED', status_text: '待复核', badge_class: 'badge-unreviewed' };
         const revNoteTip = rev.notes ? `\n备注: ${rev.notes}` : '';
@@ -359,16 +376,16 @@ function renderHistoryTable() {
             <td style="font-family:var(--font-mono)">${r.peak_amplitude !== undefined ? r.peak_amplitude.toFixed(3) : '--'} / ${r.rms_amplitude !== undefined ? r.rms_amplitude.toFixed(4) : '--'}</td>
             <td><span class="badge ${r.consensus_badge}">${r.consensus_level}</span></td>
             <td>
-                <span class="badge ${rev.badge_class || 'badge-unreviewed'}" title="${revTip}" style="cursor:pointer" onclick="openReviewModalByIndex(${globalIdx})">
+                <span class="badge ${rev.badge_class || 'badge-unreviewed'}" title="${revTip}" style="cursor:pointer" onclick="openReviewModalByIndex(${i})">
                     ${rev.status_text || '待复核'}
                 </span>
                 ${rev.reviewer ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono)">${rev.reviewer}</div>` : ''}
             </td>
             <td style="white-space:nowrap">
-                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="openReviewModalByIndex(${globalIdx})" title="进行人工复核判定">
+                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="openReviewModalByIndex(${i})" title="进行人工复核判定">
                     ✍️ 复核
                 </button>
-                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="playbackRecord(${globalIdx})">
+                <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;font-weight:600" onclick="playbackRecord(${i})">
                     ${isCurrentActive ? '👀 回放中' : '⏮ 回放'}
                 </button>
             </td>
@@ -445,35 +462,26 @@ function updateHistoryPaginationUI(totalCount, totalPages, startIdx, endIdx) {
 }
 
 function changeHistoryPage(delta) {
-    const totalCount = currentFilteredRecords.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
     const target = currentHistoryPage + delta;
-    if (target >= 1 && target <= totalPages) {
-        currentHistoryPage = target;
-        renderHistoryTable();
+    if (target >= 1 && target <= totalHistoryPages) {
+        fetchHistory(target);
     }
 }
 
 function gotoHistoryPage(p) {
-    const totalCount = currentFilteredRecords.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
     const pageNum = parseInt(p, 10);
-    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-        currentHistoryPage = pageNum;
-        renderHistoryTable();
+    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalHistoryPages) {
+        fetchHistory(pageNum);
     }
 }
 
 function gotoHistoryLastPage() {
-    const totalCount = currentFilteredRecords.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / historyPageSize));
-    gotoHistoryPage(totalPages);
+    gotoHistoryPage(totalHistoryPages);
 }
 
 function changeHistoryPageSize(newSize) {
     historyPageSize = parseInt(newSize, 10) || 15;
-    currentHistoryPage = 1;
-    renderHistoryTable();
+    fetchHistory(1);
 }
 
 function jumpToHistoryPage() {
@@ -481,6 +489,9 @@ function jumpToHistoryPage() {
     if (!input) return;
     const val = parseInt(input.value, 10);
     if (!isNaN(val)) {
+        gotoHistoryPage(val);
+    }
+}
         gotoHistoryPage(val);
     }
 }
@@ -870,14 +881,13 @@ function setHistoryFilter(f, btn) {
             const cfg = KPI_TAB_CONFIG[f];
             banner.style.display = 'flex';
             document.getElementById('tabBannerName').innerText = `${cfg.icon} ${cfg.name}`;
-            const count = historyRecords.filter(cfg.filterCheck).length;
-            document.getElementById('tabBannerCount').innerText = `${count} 份文件`;
+            document.getElementById('tabBannerCount').innerText = `查询中...`;
         } else {
             banner.style.display = 'none';
         }
     }
 
-    renderHistoryTable();
+    fetchHistory(1);
 }
 
 function handleSelectConsensusFilter(val) {
@@ -892,9 +902,10 @@ function handleSelectConsensusFilter(val) {
         const allBtn = document.querySelector('.filter-btn[onclick*="\'all\'"]');
         if (allBtn) allBtn.classList.add('active');
     }
-    renderHistoryTable();
+    fetchHistory(1);
 }
 
+let searchDebounceTimer = null;
 function handleSearchInput(val) {
     currentSearchQuery = val ? val.trim().toLowerCase() : '';
     currentHistoryPage = 1;
@@ -902,7 +913,10 @@ function handleSearchInput(val) {
     if (clearBtn) {
         clearBtn.style.display = currentSearchQuery ? 'block' : 'none';
     }
-    renderHistoryTable();
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        fetchHistory(1);
+    }, 300);
 }
 
 function clearSearchInput() {
@@ -912,7 +926,7 @@ function clearSearchInput() {
     if (input) input.value = '';
     const clearBtn = document.getElementById('btnSearchClear');
     if (clearBtn) clearBtn.style.display = 'none';
-    renderHistoryTable();
+    fetchHistory(1);
 }
 
 // 手动选择现场音频投递直接分析
@@ -1086,6 +1100,11 @@ async function submitReviewAction() {
                 reviewed_at: '',
                 notes: notes
             };
+            for (let r of currentFilteredRecords) {
+                if (r.filename === currentReviewRecord.filename && (!currentReviewRecord.timestamp || r.timestamp === currentReviewRecord.timestamp)) {
+                    r.review = updatedReview;
+                }
+            }
             for (let r of historyRecords) {
                 if (r.filename === currentReviewRecord.filename && (!currentReviewRecord.timestamp || r.timestamp === currentReviewRecord.timestamp)) {
                     r.review = updatedReview;
