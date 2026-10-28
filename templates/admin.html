@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>后台管理中心 - 风电机组碰撞声学智能诊断系统</title>
+    <title>后台管理中心 - 轮毂异响检测系统</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/admin.css">
@@ -16,11 +16,8 @@
             <div class="logo-box">
                 <span class="logo-icon">⚙️</span>
                 <div class="logo-text">
-                    <h1>风电机组碰撞声学智能诊断系统 · 后台管理中心</h1>
+                    <h1>轮毂异响检测系统 · 后台管理中心</h1>
                 </div>
-            </div>
-            <div class="node-pill">
-                <span>监测节点: <strong>{{ config.turbine_node }}</strong></span>
             </div>
         </div>
         <div class="header-right" style="gap:10px; align-items:center;">
@@ -932,7 +929,7 @@
     <!-- System Version & Industrial Status Footer -->
     <footer class="app-footer">
         <div class="footer-content">
-            <span>风电机组碰撞声学智能诊断系统 · 后台管理中心</span>
+            <span>轮毂异响检测系统 · 后台管理中心</span>
             <span class="footer-divider">|</span>
             <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version if system_version else 'v3.2.0' }}</strong></span>
             <span class="footer-divider">|</span>

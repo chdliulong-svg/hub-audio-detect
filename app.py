@@ -1572,7 +1572,7 @@ def api_admin_analytics_export_csv():
     writer = csv.writer(output)
 
     # 头部概览
-    writer.writerow(["=== 风电机组碰撞声学智能诊断系统 · 多维统计分析报表 ==="])
+    writer.writerow(["=== 轮毂异响检测系统 · 多维统计分析报表 ==="])
     writer.writerow(["导出时间", time.strftime("%Y-%m-%d %H:%M:%S")])
     writer.writerow(["时间聚合维度", "音频采样时间" if filters.get("time_dim") == "audio" else "系统诊断时间"])
     writer.writerow(["分析时间跨度", f"{filters.get('start_date')} 至 {filters.get('end_date')}"])

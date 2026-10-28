@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
-风电机组碰撞声学智能诊断系统 · 自动更新与热升级引擎 (Auto Updater)
+轮毂异响检测系统 · 自动更新与热升级引擎 (Auto Updater)
 功能：
   1. 联网检测 GitHub 远程仓库 (https://github.com/chdliulong-svg/hub-audio-detect) 最新版本
   2. 比对本地与远程提交哈希 (Commit SHA)，支持精准查看更新日志
@@ -165,7 +165,7 @@ def apply_update(restart_service=True):
       5. 重新启动服务
     """
     print("=" * 70)
-    print("[UPDATE] 正在执行【风电机组碰撞声学智能诊断系统】在线自动更新...")
+    print("[UPDATE] 正在执行【轮毂异响检测系统】在线自动更新...")
     print("=" * 70)
     print()
 

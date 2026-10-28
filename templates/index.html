@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>风电碰撞声学诊断 - 3核心大模型实时协同监控大屏</title>
+    <title>轮毂异响检测系统 - 3核心大模型实时协同监控大屏</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css?v=3.7">
 </head>
@@ -15,16 +15,12 @@
             <div class="logo-box">
                 <span class="logo-icon">⚡</span>
                 <div class="logo-text">
-                    <h1>风电机组碰撞声学智能诊断系统</h1>
+                    <h1>轮毂异响检测系统</h1>
                 </div>
             </div>
             <div class="status-indicator online" id="sysOnlineIndicator">
                 <span class="pulse-dot"></span>
                 <span id="sysOnlineText">实时在线监测中 (ONLINE)</span>
-            </div>
-            <div class="node-pill">
-                <span class="node-icon">📡</span>
-                <span>监测节点: <strong>{{ config.turbine_node }}</strong></span>
             </div>
             <div class="node-pill" title="自动归档: {{ config.monitor.watch_dir }}/processed">
                 <span>📂 监听目录: <code id="headerWatchDirCode">{{ config.monitor.watch_dir }}</code></span>
@@ -290,7 +286,7 @@
         <section class="history-section" id="historySection">
             <div class="history-header">
                 <div class="history-title-group">
-                    <h2>📋 实时诊断事件历史记录 (防误报过滤台账)</h2>
+                    <h2>📋 历史记录</h2>
                     <span class="history-count" id="historyCount">共 0 条记录</span>
                 </div>
                 <div class="history-controls-row">
@@ -514,7 +510,7 @@
     <!-- System Version & Industrial Status Footer -->
     <footer class="app-footer">
         <div class="footer-content">
-            <span>风电机组碰撞声学智能诊断系统 · 3核心声学大模型 (03K + 03U + 03R) 协同投票架构</span>
+            <span>轮毂异响检测系统 · 3核心声学大模型 (03K + 03U + 03R) 协同投票架构</span>
             <span class="footer-divider">|</span>
             <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version if system_version else 'v3.2.0' }}</strong></span>
             <span class="footer-divider">|</span>

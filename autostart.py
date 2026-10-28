@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
-风电机组碰撞声学智能诊断系统 · 开机自启动管理引擎 (AutoStart Manager)
+轮毂异响检测系统 · 开机自启动管理引擎 (AutoStart Manager)
 功能：
   1. 支持将监控系统注册为 Windows 开机/登录自启动服务
   2. 采用双重/三重保障机制：
@@ -26,7 +26,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
         pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SHORTCUT_NAME = "风电机组碰撞声学智能诊断系统.lnk"
+SHORTCUT_NAME = "轮毂异响检测系统.lnk"
 REG_KEY_NAME = "WindTurbineAudioDetect"
 TASK_NAME = "WindTurbineAudio_AutoStart"
 
@@ -171,7 +171,7 @@ def enable_autostart():
         target_path="wscript.exe",
         arguments=f'"{vbs_path}"',
         working_dir=BASE_DIR,
-        description="风电机组碰撞声学智能诊断系统 - 开机自启动"
+        description="轮毂异响检测系统 - 开机自启动"
     )
 
     # 2. 注册表 Run 键
@@ -227,7 +227,7 @@ def main():
         return
 
     print("=" * 72)
-    print("🚀 风电机组碰撞声学智能诊断系统 · 开机自启动管理器")
+    print("🚀 轮毂异响检测系统 · 开机自启动管理器")
     print("=" * 72)
 
     if args.enable:

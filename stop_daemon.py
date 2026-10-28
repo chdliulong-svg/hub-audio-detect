@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-风电机组碰撞声学智能诊断系统 · 后台服务停止管理器
+轮毂异响检测系统 · 后台服务停止管理器
 使用 psutil 安全定位并终止监听 8088 端口及后台 app.py 进程，杜绝控制台黑框残留与批处理管道解析异常
 """
 import os
@@ -15,7 +15,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 def stop_monitor_service():
     print("=" * 70)
-    print("[STOP] 正在停止【风电机组碰撞声学智能诊断系统】后台监控服务...")
+    print("[STOP] 正在停止【轮毂异响检测系统】后台监控服务...")
     print("=" * 70)
     print()
 
