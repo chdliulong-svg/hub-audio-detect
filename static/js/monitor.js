@@ -492,9 +492,6 @@ function jumpToHistoryPage() {
         gotoHistoryPage(val);
     }
 }
-        gotoHistoryPage(val);
-    }
-}
 
 // 点击回放指定历史记录
 function playbackRecord(index) {
