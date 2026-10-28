@@ -73,6 +73,7 @@ function switchAdminTab(tabName, btn) {
     } else if (tabName === 'system') {
         fetchSystemStatus();
         checkSystemUpdate(true);
+        fetchAutostartStatus();
     }
 }
 
@@ -1046,6 +1047,84 @@ async function applySystemUpdate() {
                 location.reload();
             }
         }, 1000);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 开机自启动管理 (Auto-Start Management)
+// ---------------------------------------------------------------------------
+let currentAutostartEnabled = false;
+
+async function fetchAutostartStatus() {
+    try {
+        const res = await fetch('/api/admin/autostart_status');
+        const json = await res.json();
+        if (json.success && json.status) {
+            currentAutostartEnabled = !!json.status.enabled;
+            const badge = document.getElementById('autostartStatusBadge');
+            const txt = document.getElementById('autostartStatusText');
+            const btn = document.getElementById('btnToggleAutostart');
+            const btnMain = document.getElementById('btnAutostartMain');
+
+            if (currentAutostartEnabled) {
+                if (badge) {
+                    badge.className = 'status-pill status-ready';
+                    badge.style.background = '#ecfdf5';
+                    badge.style.color = '#059669';
+                    badge.innerText = '● 已开启';
+                }
+                if (txt) {
+                    txt.innerText = '已开启开机自启';
+                    txt.style.color = '#059669';
+                }
+                if (btn) btn.innerText = '关闭';
+                if (btnMain) {
+                    btnMain.innerText = '🛑 取消开机自启动';
+                }
+            } else {
+                if (badge) {
+                    badge.className = 'status-pill';
+                    badge.style.background = '#f1f5f9';
+                    badge.style.color = '#64748b';
+                    badge.innerText = '● 未开启';
+                }
+                if (txt) {
+                    txt.innerText = '未开启自启动';
+                    txt.style.color = 'var(--text-main)';
+                }
+                if (btn) btn.innerText = '开启';
+                if (btnMain) {
+                    btnMain.innerText = '🚀 开启开机自启动';
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Fetch autostart status error:', e);
+    }
+}
+
+async function toggleWebAutostart() {
+    const targetState = !currentAutostartEnabled;
+    const actionName = targetState ? '开启开机自启动' : '取消开机自启动';
+    if (!confirm(`确定要${actionName}吗？\n\n开启后，风电机组工控机在每次断电开机或系统重启时，都将全自动静默唤醒监控后台并在大屏打开系统。`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/admin/toggle_autostart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enable: targetState })
+        });
+        const json = await res.json();
+        if (json.success) {
+            alert('✅ ' + json.msg);
+            fetchAutostartStatus();
+        } else {
+            alert('❌ 操作失败: ' + (json.error || json.msg || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求异常: ' + err);
     }
 }
 

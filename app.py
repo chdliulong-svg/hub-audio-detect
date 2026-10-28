@@ -1587,6 +1587,33 @@ def api_admin_apply_update():
     except Exception as e:
         return jsonify({"success": False, "error": f"触发更新失败: {e}"}), 500
 
+@app.route("/api/admin/autostart_status", methods=["GET"])
+def api_admin_autostart_status():
+    """获取当前开机自启动配置状态"""
+    try:
+        import autostart
+        st = autostart.get_status()
+        return jsonify({"success": True, "status": st})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"获取自启动状态失败: {e}"}), 500
+
+@app.route("/api/admin/toggle_autostart", methods=["POST"])
+def api_admin_toggle_autostart():
+    """Web 端一键切换开机自启动"""
+    try:
+        data = request.get_json(silent=True) or {}
+        enable = data.get("enable", True)
+        import autostart
+        if enable:
+            res = autostart.enable_autostart()
+            add_log("INFO", "【系统设置】管理员通过 Web 后台开启了开机自启动功能")
+        else:
+            res = autostart.disable_autostart()
+            add_log("INFO", "【系统设置】管理员通过 Web 后台取消了开机自启动功能")
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"切换自启动状态失败: {e}"}), 500
+
 # ---------------------------------------------------------------------------
 # 主程序入口
 # ---------------------------------------------------------------------------
