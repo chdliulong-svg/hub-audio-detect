@@ -1307,8 +1307,12 @@ def api_admin_analytics():
         "collision_avg_conf": [],
         "normal_avg_conf": [],
         "alarm_votes": [],
-        "avg_infer_ms": []
+        "avg_infer_ms": [],
+        "has_collision": False,
+        "has_alarm_votes": False
     }
+    total_coll_cnt = 0
+    total_vote_cnt = 0
     for m in models_meta:
         mid = m["id"]
         c_confs = []
@@ -1322,22 +1326,44 @@ def api_admin_analytics():
             m_details = r.get("model_details", {}).get(mid, {})
             
             if mid in scores:
-                sc = scores[mid]
+                try:
+                    sc = float(scores[mid])
+                except (ValueError, TypeError):
+                    sc = 0.0
                 if p["cat"] in ["CRITICAL_COLLISION_UNANIMOUS", "MAJORITY_COLLISION_ALARM"]:
                     c_confs.append(sc)
                 else:
-                    n_confs.append(sc)
+                    # 关键逻辑修复：scores[mid] 输出为碰撞类别概率(例如0.5%)。
+                    # 当样本为正常运行底噪时，模型对底噪的识别置信度应为 100% - 碰撞概率(即99.5%)
+                    # 极低微弱底噪快速放行(sc=0.0)代表100%确信为平稳底噪
+                    normal_conf = max(0.0, min(100.0, 100.0 - sc))
+                    n_confs.append(normal_conf)
+            elif p["cat"] not in ["CRITICAL_COLLISION_UNANIMOUS", "MAJORITY_COLLISION_ALARM"]:
+                # 直通放行(极低RMS/启停机放行无大模型分数)，底噪判定置信度为 100%
+                n_confs.append(100.0)
             
             if mid in alarms:
-                votes += int(alarms.get(mid, 0))
+                try:
+                    votes += int(alarms.get(mid, 0))
+                except (ValueError, TypeError):
+                    pass
             
             if "infer_time_ms" in m_details:
-                inf_times.append(float(m_details["infer_time_ms"]))
+                try:
+                    inf_times.append(float(m_details["infer_time_ms"]))
+                except (ValueError, TypeError):
+                    pass
 
-        models_chart["collision_avg_conf"].append(round(sum(c_confs) / len(c_confs), 1) if c_confs else 0.0)
-        models_chart["normal_avg_conf"].append(round(sum(n_confs) / len(n_confs), 1) if n_confs else 0.0)
+        # 若时段内无确诊碰撞事件，返回 None 避免在前端绘制令人误解的 0% 矮柱，前端 tooltip 友好提示
+        models_chart["collision_avg_conf"].append(round(sum(c_confs) / len(c_confs), 1) if c_confs else None)
+        models_chart["normal_avg_conf"].append(round(sum(n_confs) / len(n_confs), 1) if n_confs else 100.0)
         models_chart["alarm_votes"].append(votes)
         models_chart["avg_infer_ms"].append(round(sum(inf_times) / len(inf_times), 1) if inf_times else 0.0)
+        total_coll_cnt += len(c_confs)
+        total_vote_cnt += votes
+
+    models_chart["has_collision"] = (total_coll_cnt > 0)
+    models_chart["has_alarm_votes"] = (total_vote_cnt > 0)
 
     # 6. Chart 5: 人工专家质检复核 (Reviews Horizontal Bar)
     review_status_defs = [

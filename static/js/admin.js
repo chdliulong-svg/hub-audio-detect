@@ -1438,6 +1438,20 @@ function renderModelsChart(models) {
         chartModelsInstance = null;
     }
 
+    const hasCollision = Boolean(models.has_collision || (models.collision_avg_conf && models.collision_avg_conf.some(v => v !== null && v > 0)));
+    const maxVotes = models.alarm_votes && models.alarm_votes.length ? Math.max(...models.alarm_votes) : 0;
+
+    // 动态同步卡片小标题状态徽章
+    const subtitleEl = canvas.closest('.chart-box')?.querySelector('.chart-subtitle');
+    if (subtitleEl) {
+        const baseTitle = '03K (Dasheng) / 03U (ECHOv2) / 03R (GRAM)';
+        if (!hasCollision) {
+            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#ecfdf5;color:#059669;font-size:11px;font-weight:600;">🛡️ 全量底噪高置信放行 (0 告警)</span>`;
+        } else {
+            subtitleEl.innerHTML = `${baseTitle} <span style="margin-left:8px;padding:2px 7px;border-radius:4px;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:600;">⚠️ 包含确诊碰撞事件对比</span>`;
+        }
+    }
+
     const ctx = canvas.getContext('2d');
     chartModelsInstance = new Chart(ctx, {
         type: 'bar',
@@ -1448,18 +1462,21 @@ function renderModelsChart(models) {
                     label: '碰撞均值置信度 (%)',
                     data: models.collision_avg_conf || [],
                     backgroundColor: '#ef4444',
+                    borderRadius: 4,
                     yAxisID: 'y'
                 },
                 {
                     label: '底噪均值置信度 (%)',
                     data: models.normal_avg_conf || [],
                     backgroundColor: '#10b981',
+                    borderRadius: 4,
                     yAxisID: 'y'
                 },
                 {
                     label: '告警表决票数 (票)',
                     data: models.alarm_votes || [],
                     backgroundColor: '#3b82f6',
+                    borderRadius: 4,
                     yAxisID: 'y1'
                 }
             ]
@@ -1470,9 +1487,46 @@ function renderModelsChart(models) {
             plugins: {
                 legend: {
                     position: 'top',
-                    labels: { boxWidth: 12, padding: 8, font: { size: 11 } }
+                    labels: { 
+                        boxWidth: 12, 
+                        padding: 8, 
+                        font: { size: 11, family: CHART_DEFAULTS.fontFamily } 
+                    }
                 },
-                tooltip: { backgroundColor: '#1e293b', padding: 10, cornerRadius: 6 }
+                tooltip: { 
+                    backgroundColor: '#1e293b', 
+                    padding: 10, 
+                    cornerRadius: 6,
+                    callbacks: {
+                        label: function(context) {
+                            const dsLabel = context.dataset.label || '';
+                            const val = context.raw;
+                            if (dsLabel.includes('碰撞均值置信度')) {
+                                if (val === null || val === undefined) {
+                                    return `${dsLabel}: 时段内无确诊碰撞 (0起)`;
+                                }
+                                return `${dsLabel}: ${val}%`;
+                            }
+                            if (dsLabel.includes('底噪均值置信度')) {
+                                return `${dsLabel}: ${val}% (高确信平稳正常)`;
+                            }
+                            return `${dsLabel}: ${val} 票`;
+                        },
+                        afterBody: function(contexts) {
+                            if (!contexts || !contexts.length) return [];
+                            const idx = contexts[0].dataIndex;
+                            const inferMs = models.avg_infer_ms && models.avg_infer_ms[idx];
+                            const lines = [];
+                            if (inferMs) {
+                                lines.push(`⚡ 单音频推理均耗: ${inferMs} ms`);
+                            }
+                            if (!hasCollision) {
+                                lines.push('ℹ️ 模型性能评价: 深度特征极低碰撞概率，正常底噪辨识率极高');
+                            }
+                            return lines;
+                        }
+                    }
+                }
             },
             scales: {
                 x: {
@@ -1490,7 +1544,9 @@ function renderModelsChart(models) {
                 y1: {
                     type: 'linear',
                     position: 'right',
+                    display: maxVotes > 0, // 仅当真实产生了告警票数时才显示右侧 Y 轴，无票时彻底隐藏右侧 0~1 孤立刻度
                     beginAtZero: true,
+                    suggestedMax: Math.max(10, maxVotes * 1.2),
                     grid: { drawOnChartArea: false },
                     ticks: { color: '#3b82f6', precision: 0 }
                 }
