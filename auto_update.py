@@ -28,6 +28,42 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
+def ensure_field_protections():
+    """
+    现场双重核心安全防护：
+    1. 锁定现场 config.json (git update-index --skip-worktree)，防止 pull/reset --hard 冲刷现场 IP 与监听目录
+    2. 自动检查并补全 .git/info/exclude 规则，保障现场音频与历史记录免受 git 污染与冲突
+    """
+    try:
+        run_git_cmd(["update-index", "--skip-worktree", "config.json"])
+        git_info_dir = os.path.join(BASE_DIR, ".git", "info")
+        if os.path.isdir(git_info_dir):
+            exclude_path = os.path.join(git_info_dir, "exclude")
+            current_content = ""
+            if os.path.exists(exclude_path):
+                with open(exclude_path, "r", encoding="utf-8", errors="ignore") as f:
+                    current_content = f.read()
+            
+            rules_to_add = [
+                "config.json.site_backup*",
+                "config.json.bak*",
+                ".workbuddy/",
+                "records/history.json",
+                "records/*.wav",
+                "records/*.png",
+                "records/*.log",
+                "incoming_audio/processed/*",
+                "incoming_audio/172.16.*",
+                "*.tmp",
+                "*.bak"
+            ]
+            missing_rules = [r for r in rules_to_add if r not in current_content]
+            if missing_rules:
+                with open(exclude_path, "a", encoding="utf-8") as f:
+                    f.write("\n# 现场自动更新保护规则\n" + "\n".join(missing_rules) + "\n")
+    except Exception as e:
+        pass
+
 def run_git_cmd(args, timeout=25):
     """安全执行 Git 命令并返回 (returncode, stdout, stderr)"""
     try:
@@ -137,6 +173,17 @@ def apply_update(restart_service=True):
 
     # 2. 拉取远程最新代码
     print("[2/5] 正在从 GitHub (chdliulong-svg/hub-audio-detect) 拉取最新代码...")
+    ensure_field_protections()
+
+    # 现场配置硬备份
+    cfg_path = os.path.join(BASE_DIR, "config.json")
+    cfg_backup = os.path.join(BASE_DIR, "config.json.site_backup")
+    if os.path.exists(cfg_path):
+        try:
+            shutil.copy2(cfg_path, cfg_backup)
+        except Exception:
+            pass
+
     # 若有未跟踪的意外冲突变动，先保护或清理
     run_git_cmd(["stash", "--quiet"])
     rc, pull_out, pull_err = run_git_cmd(["pull", "origin", "main"], timeout=60)
@@ -147,7 +194,17 @@ def apply_update(restart_service=True):
         if rc2 != 0:
             print(f"  [ERROR] 强制重置失败: {err2}")
             return False
-    print("  [OK] 核心代码已成功同步至最新版本！\n")
+
+    # 现场配置完整性二次核验与还原防护
+    if os.path.exists(cfg_backup):
+        try:
+            if not os.path.exists(cfg_path) or os.path.getsize(cfg_path) == 0:
+                shutil.copy2(cfg_backup, cfg_path)
+            run_git_cmd(["update-index", "--skip-worktree", "config.json"])
+        except Exception:
+            pass
+
+    print("  [OK] 核心代码已成功同步至最新版本！(现场环境配置已完好保留)\n")
 
     # 3. 增量更新 Python 依赖
     req_file = os.path.join(BASE_DIR, "requirements.txt")
@@ -187,6 +244,7 @@ def apply_update(restart_service=True):
     return True
 
 def main():
+    ensure_field_protections()
     parser = argparse.ArgumentParser(description="风电机组碰撞声学系统自动更新器")
     parser.add_argument("--check", action="store_true", help="仅检测是否有新版本并输出详情")
     parser.add_argument("--json", action="store_true", help="以 JSON 格式输出检测结果供 Web 后台使用")

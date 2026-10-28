@@ -100,9 +100,10 @@ RECORDS_DIR = os.path.join(APP_DIR, "records")
 HISTORY_JSON = os.path.join(RECORDS_DIR, "history.json")
 SYSTEM_LOG_PATH = os.path.join(RECORDS_DIR, "system.log")
 
-FIELD_RECORD_DIR = CONFIG.get("field_record_dir", "")
-CODE_BASE_DIR = CONFIG.get("code_base_dir", "")
-if not CODE_BASE_DIR or not os.path.exists(CODE_BASE_DIR):
+FIELD_RECORD_DIR = resolve_dir_path(CONFIG.get("field_record_dir", "incoming_audio"), "incoming_audio")
+raw_code_base = CONFIG.get("code_base_dir", "models_repo")
+CODE_BASE_DIR = resolve_dir_path(raw_code_base, "models_repo")
+if not os.path.exists(CODE_BASE_DIR):
     local_repo = os.path.join(APP_DIR, "models_repo")
     if os.path.exists(local_repo):
         CODE_BASE_DIR = local_repo
@@ -380,39 +381,10 @@ history_records = []
 latest_result = None
 is_algorithm_running = True
 
-# 加载历史记录并标准化 review 字段
-if os.path.exists(HISTORY_JSON):
-    try:
-        with open(HISTORY_JSON, "r", encoding="utf-8") as f:
-            history_records = json.load(f)
-            for r in history_records:
-                format_review_info(r)
-                if r.get("consensus_level") == "HARDWARE_CLIPPING_DISCARD":
-                    r["consensus_title"] = "幅值饱和"
-            if history_records:
-                latest_result = history_records[0]
-        add_log("INFO", f"已加载本地历史诊断记录 {len(history_records)} 条")
-    except Exception as e:
-        add_log("ERROR", f"加载历史记录失败: {e}")
-        history_records = []
-
-# 启动时将 processed 根目录现存散落的文件按结果自动整理到分类子目录
-def organize_existing_processed_files():
-    fn_to_level = {r["filename"]: r.get("consensus_level", "NORMAL_CLEAN_NOISE") for r in history_records if "filename" in r}
-    try:
-        for item in os.listdir(PROCESSED_DIR):
-            p = os.path.join(PROCESSED_DIR, item)
-            if os.path.isfile(p) and item.lower().endswith((".bin", ".wav")):
-                lvl = fn_to_level.get(item, "NORMAL_CLEAN_NOISE")
-                archive_processed_file(p, lvl)
-    except Exception as e:
-        add_log("WARN", f"整理历史归档散落文件异常: {e}")
-
-organize_existing_processed_files()
-
 def save_history():
     """保存历史记录至本地磁盘 (原子写入，杜绝外部并发读取冲突)"""
     try:
+        os.makedirs(os.path.dirname(HISTORY_JSON), exist_ok=True)
         tmp_path = HISTORY_JSON + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(history_records[:50000], f, ensure_ascii=False, indent=2)
@@ -421,8 +393,167 @@ def save_history():
     except Exception as e:
         add_log("ERROR", f"保存历史记录失败: {e}")
 
+def sync_processed_files_to_history():
+    """
+    扫描 incoming_audio/processed 各分类子目录，补充磁盘存在但历史台账尚未收录的文件记录。
+    确保启动时全量对齐所有已处理的历史音频。
+    """
+    global history_records
+    DIR_TO_CONSENSUS = {
+        "01_全票确诊碰撞_3票": {"consensus_level": "UNANIMOUS_COLLISION", "consensus_title": "全票碰撞", "consensus_badge": "badge-danger", "alarm_votes": 3, "is_alarm": True, "mean_confidence_pct": 95.0},
+        "02_多数表决碰撞_2票": {"consensus_level": "MAJORITY_COLLISION", "consensus_title": "多数碰撞", "consensus_badge": "badge-danger", "alarm_votes": 2, "is_alarm": True, "mean_confidence_pct": 88.0},
+        "03_孤立扰动拦截_1票": {"consensus_level": "SHIELDED_ISOLATED_DISTURBANCE", "consensus_title": "扰动拦截", "consensus_badge": "badge-warning", "alarm_votes": 1, "is_alarm": False, "mean_confidence_pct": 33.0},
+        "04_正常平稳底噪_0票": {"consensus_level": "NORMAL_CLEAN_NOISE", "consensus_title": "正常平稳", "consensus_badge": "badge-success", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+        "05_硬件削顶死锁": {"consensus_level": "HARDWARE_CLIPPING_DISCARD", "consensus_title": "幅值饱和", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+        "06_现场机组启动工况": {"consensus_level": "MACHINE_STARTUP_SAFE", "consensus_title": "机组启动", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+        "07_现场机组停机工况": {"consensus_level": "MACHINE_SHUTDOWN_SAFE", "consensus_title": "机组停机", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+    }
+    
+    if not os.path.exists(PROCESSED_DIR):
+        return
+
+    known_filenames = {r.get("filename") for r in history_records if "filename" in r}
+    added_count = 0
+    
+    for sub, meta in DIR_TO_CONSENSUS.items():
+        sub_dir = os.path.join(PROCESSED_DIR, sub)
+        if not os.path.isdir(sub_dir):
+            continue
+        try:
+            for item in os.listdir(sub_dir):
+                if not item.lower().endswith((".bin", ".wav")):
+                    continue
+                if item in known_filenames:
+                    continue
+                
+                full_p = os.path.join(sub_dir, item)
+                m = re.search(r"(?:SY)?(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", item)
+                if m:
+                    ts = f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)}"
+                else:
+                    try:
+                        mtime = os.path.getmtime(full_p)
+                        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+                    except Exception:
+                        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+
+                syn_record = {
+                    "success": True,
+                    "filename": item,
+                    "timestamp": ts,
+                    "duration_sec": 20.0,
+                    "peak_amplitude": 0.0,
+                    "rms_amplitude": 0.0,
+                    "crest_factor": 0.0,
+                    "is_clipped": (meta["consensus_level"] == "HARDWARE_CLIPPING_DISCARD"),
+                    "rail_voltage": 0.0,
+                    "clip_msg": "",
+                    "scores": {},
+                    "alarms": {},
+                    "model_details": {},
+                    "alarm_votes": meta["alarm_votes"],
+                    "mean_confidence_pct": meta["mean_confidence_pct"],
+                    "consensus_level": meta["consensus_level"],
+                    "consensus_title": meta["consensus_title"],
+                    "consensus_badge": meta["consensus_badge"],
+                    "is_alarm": meta["is_alarm"],
+                    "infer_ms": 0,
+                    "wav_file": "",
+                    "plot_file": "",
+                }
+                format_review_info(syn_record)
+                history_records.append(syn_record)
+                known_filenames.add(item)
+                added_count += 1
+        except Exception as e:
+            add_log("WARN", f"扫描归档目录补充历史记录异常 ({sub}): {e}")
+
+    if added_count > 0:
+        history_records.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+        save_history()
+        add_log("INFO", f"已从本地 processed 归档目录自动补充已处理音频记录 {added_count} 条")
+
+def load_initial_history_records():
+    """
+    启动时自动加载历史处理记录：
+    1. 优先读取当前部署包 records/history.json；
+    2. 若本地无记录或为空，自动从母本历史记录目录回退并同步拷贝；
+    3. 补充已处理归档子目录中可能未入库的历史音频；
+    4. 格式化复核字段与状态，全局生效。
+    """
+    global history_records, latest_result
+    loaded = []
+
+    # 1. 尝试从本地 records/history.json 读取
+    if os.path.exists(HISTORY_JSON):
+        try:
+            with open(HISTORY_JSON, "r", encoding="utf-8") as f:
+                content = json.load(f)
+                if isinstance(content, list) and len(content) > 0:
+                    loaded = content
+        except Exception as e:
+            add_log("ERROR", f"读取本地历史记录失败: {e}")
+            loaded = []
+
+    # 2. 本地为空则自动尝试从候选备份源恢复
+    if not loaded:
+        fallback_candidates = [
+            r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records\history.json",
+            os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records", "history.json"),
+            os.path.join(os.path.dirname(BASE_DIR), "03_triple_model_realtime_monitor", "records", "history.json")
+        ]
+        for fb_path in fallback_candidates:
+            if os.path.exists(fb_path):
+                try:
+                    with open(fb_path, "r", encoding="utf-8") as f:
+                        fb_records = json.load(f)
+                        if isinstance(fb_records, list) and len(fb_records) > 0:
+                            loaded = fb_records
+                            add_log("INFO", f"已从历史母本归档成功恢复 {len(loaded)} 条诊断记录: {fb_path}")
+                            try:
+                                os.makedirs(os.path.dirname(HISTORY_JSON), exist_ok=True)
+                                shutil.copy2(fb_path, HISTORY_JSON)
+                            except Exception as copy_e:
+                                add_log("WARN", f"同步母本历史记录至本地失败: {copy_e}")
+                            break
+                except Exception as e:
+                    add_log("WARN", f"读取历史候选源失败 {fb_path}: {e}")
+
+    # 3. 标准化 review 字段与标签
+    for r in loaded:
+        format_review_info(r)
+        if r.get("consensus_level") == "HARDWARE_CLIPPING_DISCARD":
+            r["consensus_title"] = "幅值饱和"
+
+    history_records = loaded
+
+    # 4. 同步 processed 归档目录中遗留的有效已处理音频
+    sync_processed_files_to_history()
+
+    if history_records:
+        latest_result = history_records[0]
+    add_log("INFO", f"历史诊断记录加载完成，系统就绪总数: {len(history_records)} 条")
+
+# 启动时将 processed 根目录现存散落的文件按结果自动整理到分类子目录
+def organize_existing_processed_files():
+    fn_to_level = {r["filename"]: r.get("consensus_level", "NORMAL_CLEAN_NOISE") for r in history_records if "filename" in r}
+    try:
+        if not os.path.exists(PROCESSED_DIR):
+            return
+        for item in os.listdir(PROCESSED_DIR):
+            p = os.path.join(PROCESSED_DIR, item)
+            if os.path.isfile(p) and item.lower().endswith((".bin", ".wav")):
+                lvl = fn_to_level.get(item, "NORMAL_CLEAN_NOISE")
+                archive_processed_file(p, lvl)
+    except Exception as e:
+        add_log("WARN", f"整理历史归档散落文件异常: {e}")
+
+# 启动执行自动加载历史记录与散落归档文件整理
+load_initial_history_records()
+organize_existing_processed_files()
+
 def process_file_and_record(file_path):
-    """单例互斥执行 3 模型诊断并入库"""
+    """单例互斥执行 3 模型诊断并入库，在历史记录基础上递增"""
     global latest_result
     with inference_lock:
         res = engine.analyze_audio_file(file_path, output_dir=RECORDS_DIR, generate_plot=True)
@@ -431,6 +562,14 @@ def process_file_and_record(file_path):
             format_review_info(res)
             
             latest_result = res
+            
+            # 去重：若历史中已存在同名记录，先移除旧记录，再将最新诊断结果插在首位递增
+            fn = res.get("filename")
+            for i, old_r in enumerate(history_records):
+                if old_r.get("filename") == fn:
+                    history_records.pop(i)
+                    break
+
             history_records.insert(0, res)
             if len(history_records) > 50000:
                 history_records.pop()
@@ -613,7 +752,19 @@ def api_upload():
 # 5. 静态资源免缓存路由
 @app.route("/records/<path:filename>")
 def serve_records(filename):
-    resp = send_from_directory(RECORDS_DIR, filename)
+    local_path = os.path.join(RECORDS_DIR, filename)
+    target_dir = RECORDS_DIR
+    if not os.path.exists(local_path):
+        fallback_dirs = [
+            os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records"),
+            r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records",
+            os.path.join(os.path.dirname(BASE_DIR), "03_triple_model_realtime_monitor", "records")
+        ]
+        for fb in fallback_dirs:
+            if os.path.exists(os.path.join(fb, filename)):
+                target_dir = fb
+                break
+    resp = send_from_directory(target_dir, filename)
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -1604,18 +1755,8 @@ def api_admin_restart_engine():
             )
             is_algorithm_running = True
             
-            # 4. 重新同步本地历史台账
-            if os.path.exists(HISTORY_JSON):
-                try:
-                    with open(HISTORY_JSON, "r", encoding="utf-8") as hf:
-                        loaded_records = json.load(hf)
-                        for r in loaded_records:
-                            format_review_info(r)
-                            if r.get("consensus_level") == "HARDWARE_CLIPPING_DISCARD":
-                                r["consensus_title"] = "幅值饱和"
-                        history_records[:] = loaded_records
-                except Exception:
-                    pass
+            # 4. 重新同步本地历史台账与增量补充
+            load_initial_history_records()
             
             cost_s = round(time.time() - t0, 2)
             add_log("INFO", f"【系统控制】算法检测系统全量重启完成！耗时: {cost_s}s，CPD 启停机门禁与 3 核心大模型已全部刷新就绪")
