@@ -505,7 +505,9 @@ let isAlgorithmRunning = true;
 function updateAlgorithmRunningUI(running) {
     isAlgorithmRunning = !!running;
 
-    // Header 元素
+    // Header 状态指示器 (与大屏保持完全一致)
+    const ind = document.getElementById('sysOnlineIndicator');
+    const txt = document.getElementById('sysOnlineText');
     const hBadge = document.getElementById('headerAlgoStatusBadge');
     const hStopBtn = document.getElementById('btnHeaderStopAlgo');
     const hStartBtn = document.getElementById('btnHeaderStartAlgo');
@@ -518,9 +520,11 @@ function updateAlgorithmRunningUI(running) {
     const cStartBtn = document.getElementById('btnStartEngineCard');
 
     if (isAlgorithmRunning) {
+        if (ind) ind.className = 'status-indicator online';
+        if (txt) txt.innerText = '实时在线监测中 (ONLINE)';
         if (hBadge) {
             hBadge.className = 'status-pill status-ready';
-            hBadge.innerText = '● 算法检测运行中';
+            hBadge.innerText = '● 实时在线监测中 (ONLINE)';
         }
         if (hStopBtn) hStopBtn.style.display = 'inline-flex';
         if (hStartBtn) hStartBtn.style.display = 'none';
@@ -530,14 +534,16 @@ function updateAlgorithmRunningUI(running) {
 
         if (cBadge) {
             cBadge.className = 'status-pill status-ready';
-            cBadge.innerText = '● 算法检测运行中 (RUNNING)';
+            cBadge.innerText = '● 实时在线监测中 (ONLINE)';
         }
         if (cStopBtn) cStopBtn.style.display = 'inline-flex';
         if (cStartBtn) cStartBtn.style.display = 'none';
     } else {
+        if (ind) ind.className = 'status-indicator paused';
+        if (txt) txt.innerText = '算法已暂停检测 (PAUSED)';
         if (hBadge) {
             hBadge.className = 'status-pill status-stopped';
-            hBadge.innerText = '● 算法检测已暂停';
+            hBadge.innerText = '● 算法已暂停检测 (PAUSED)';
         }
         if (hStopBtn) hStopBtn.style.display = 'none';
         if (hStartBtn) hStartBtn.style.display = 'inline-flex';
@@ -547,7 +553,7 @@ function updateAlgorithmRunningUI(running) {
 
         if (cBadge) {
             cBadge.className = 'status-pill status-stopped';
-            cBadge.innerText = '● 算法检测已暂停 (STOPPED)';
+            cBadge.innerText = '● 算法已暂停检测 (PAUSED)';
         }
         if (cStopBtn) cStopBtn.style.display = 'none';
         if (cStartBtn) cStartBtn.style.display = 'inline-flex';
