@@ -272,9 +272,84 @@ class DatabaseManager:
         params = []
 
         if search:
-            search_str = f"%{search.strip().lower()}%"
-            where.append("(LOWER(filename) LIKE ? OR LOWER(timestamp) LIKE ? OR LOWER(review_notes) LIKE ? OR LOWER(review_reviewer) LIKE ?)")
-            params.extend([search_str, search_str, search_str, search_str])
+            terms = [t.strip() for t in search.strip().split() if t.strip()]
+            for term in terms:
+                term_lower = term.lower()
+                term_like = f"%{term_lower}%"
+                term_conds = []
+                term_params = []
+
+                # 1. 核心字段全文模糊匹配 (文件名、wav文件名、时间戳、结论标题、工况等级、复核状态、复核人、复核备注、模型明细)
+                base_fields = [
+                    "LOWER(filename)",
+                    "LOWER(wav_file)",
+                    "LOWER(timestamp)",
+                    "LOWER(consensus_title)",
+                    "LOWER(consensus_level)",
+                    "LOWER(review_status)",
+                    "LOWER(review_reviewer)",
+                    "LOWER(review_notes)",
+                    "LOWER(model_details_json)"
+                ]
+                for bf in base_fields:
+                    term_conds.append(f"{bf} LIKE ?")
+                    term_params.append(term_like)
+
+                # 削顶文本智能匹配，避免 '无削顶' 误伤
+                if "无削顶" in term_lower:
+                    term_conds.append("LOWER(clip_msg) LIKE '%无削顶%'")
+                elif any(k in term_lower for k in ("削顶", "失真", "截幅")):
+                    term_conds.append("(is_clipped = 1 OR consensus_level = 'HARDWARE_CLIPPING_DISCARD' OR (LOWER(clip_msg) LIKE '%削顶%' AND LOWER(clip_msg) NOT LIKE '%无削顶%'))")
+                else:
+                    term_conds.append("LOWER(clip_msg) LIKE ?")
+                    term_params.append(term_like)
+
+                # 2. 文件扩展名互通兼容 (输入 .wav 可搜到 .bin，输入 .bin 可搜到 .wav，输入无后缀也能搜)
+                stem = term_lower
+                if stem.endswith(".wav") or stem.endswith(".bin"):
+                    stem = stem[:-4]
+                if stem != term_lower and len(stem) > 0:
+                    stem_like = f"%{stem}%"
+                    term_conds.append("LOWER(filename) LIKE ?")
+                    term_params.append(stem_like)
+                    term_conds.append("LOWER(wav_file) LIKE ?")
+                    term_params.append(stem_like)
+
+                # 3. 日期格式兼容 (如 2026-09-04 或 09-04，兼容纯数字 20260904 匹配 filename 或 timestamp)
+                term_no_dash = term_lower.replace("-", "").replace("/", "").replace(":", "")
+                if term_no_dash != term_lower and len(term_no_dash) >= 4:
+                    no_dash_like = f"%{term_no_dash}%"
+                    term_conds.append("LOWER(filename) LIKE ?")
+                    term_params.append(no_dash_like)
+                    term_conds.append("LOWER(wav_file) LIKE ?")
+                    term_params.append(no_dash_like)
+
+                # 4. 中文与工况语义智能联想匹配
+                if any(k in term_lower for k in ("正常", "放行", "平稳", "底噪", "0/3", "0票", "零票")):
+                    term_conds.append("(consensus_level = 'NORMAL_CLEAN_NOISE' OR (alarm_votes = 0 AND is_alarm = 0) OR LOWER(consensus_title) LIKE '%正常%' OR LOWER(consensus_title) LIKE '%放行%')")
+                if any(k in term_lower for k in ("碰撞", "告警", "金属")):
+                    term_conds.append("(is_alarm = 1 OR alarm_votes >= 2 OR LOWER(consensus_title) LIKE '%碰撞%' OR LOWER(consensus_title) LIKE '%告警%')")
+                if any(k in term_lower for k in ("全票", "3/3", "3票", "确诊")):
+                    term_conds.append("(alarm_votes = 3 OR consensus_level = 'CRITICAL_COLLISION_UNANIMOUS' OR LOWER(consensus_title) LIKE '%全票%')")
+                if any(k in term_lower for k in ("多数", "2/3", "2票")):
+                    term_conds.append("(alarm_votes = 2 OR consensus_level = 'MAJORITY_COLLISION_ALARM' OR LOWER(consensus_title) LIKE '%多数%')")
+                if any(k in term_lower for k in ("扰动", "拦截", "屏蔽", "1/3", "1票", "孤立")):
+                    term_conds.append("(alarm_votes = 1 OR consensus_level = 'ISOLATED_DISTURBANCE_SAFE' OR LOWER(consensus_title) LIKE '%扰动%' OR LOWER(consensus_title) LIKE '%拦截%')")
+                if any(k in term_lower for k in ("开机", "启动", "启机")):
+                    term_conds.append("(consensus_level = 'MACHINE_STARTUP_SAFE' OR LOWER(consensus_title) LIKE '%开机%' OR LOWER(consensus_title) LIKE '%启动%')")
+                if any(k in term_lower for k in ("停机", "刹车")):
+                    term_conds.append("(consensus_level = 'MACHINE_SHUTDOWN_SAFE' OR LOWER(consensus_title) LIKE '%停机%')")
+                if any(k in term_lower for k in ("待复核", "未复核", "未审核")):
+                    term_conds.append("(review_status = 'UNREVIEWED' OR review_status = 'PENDING_REVIEW' OR review_status IS NULL)")
+                elif any(k in term_lower for k in ("已复核", "已审核")):
+                    term_conds.append("(review_status != 'UNREVIEWED' AND review_status != 'PENDING_REVIEW' AND review_status IS NOT NULL)")
+                elif "真碰撞" in term_lower or "确认碰撞" in term_lower:
+                    term_conds.append("review_status = 'CONFIRMED_COLLISION'")
+                elif "误报" in term_lower:
+                    term_conds.append("review_status = 'CONFIRMED_FALSE_ALARM'")
+
+                where.append(f"({' OR '.join(term_conds)})")
+                params.extend(term_params)
 
         if date_filter:
             df = date_filter.strip()

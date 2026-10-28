@@ -910,10 +910,23 @@ function handleSearchInput(val) {
     if (clearBtn) {
         clearBtn.style.display = currentSearchQuery ? 'block' : 'none';
     }
+    // 当输入关键词时，自动重置工况分类筛选为全量搜索，避免受先前点击的工况Tab限制导致搜不出数据
+    if (currentSearchQuery) {
+        currentFilter = 'all';
+        currentConsensusFilter = 'ALL';
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        const allBtn = document.querySelector('.filter-btn[onclick*="\'all\'"]');
+        if (allBtn) allBtn.classList.add('active');
+        const thSel = document.getElementById('thConsensusSelect');
+        if (thSel) thSel.value = 'ALL';
+        const banner = document.getElementById('kpiTabActiveBanner');
+        if (banner) banner.style.display = 'none';
+        document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active-tab'));
+    }
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
         fetchHistory(1);
-    }, 300);
+    }, 250);
 }
 
 function clearSearchInput() {
