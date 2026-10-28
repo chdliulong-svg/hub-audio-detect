@@ -88,6 +88,7 @@ try:
         print(f"    - 【{code}】{meta.get('name')} ({meta.get('params')}参数) -> 就绪")
 except Exception as e:
     print(f"  [ERROR] 模型载入异常: {e}")
+    print("  [INFO] 提示：若缺少 model.safetensors 骨干权重，请运行【0_一键下载模型权重.bat】或 python download_weights.py 自动拉取！")
     sys.exit(1)
 
 # 4. 执行样本端到端真实推理测试
