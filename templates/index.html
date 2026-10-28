@@ -29,10 +29,6 @@
             <div class="node-pill" title="自动归档: {{ config.monitor.watch_dir }}/processed">
                 <span>📂 监听目录: <code id="headerWatchDirCode">{{ config.monitor.watch_dir }}</code></span>
             </div>
-            <div class="node-pill version-pill" title="系统软件版本: {{ system_version }}">
-                <span class="node-icon">🏷️</span>
-                <span>版本: <strong style="color: #2563eb;">{{ system_version }}</strong></span>
-            </div>
         </div>
         <div class="header-right">
             <input type="file" id="audioUploadInput" accept=".wav,.bin,.WAV,.BIN,audio/wav,audio/x-wav,application/octet-stream" style="display:none" onchange="handleManualUpload(this)">
