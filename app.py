@@ -17,6 +17,8 @@ import psutil
 import gc
 import re
 import io
+import wave
+import numpy as np
 import csv
 from datetime import datetime, timedelta
 import importlib
@@ -573,7 +575,7 @@ def process_file_and_record(file_path):
     """单例互斥执行 3 模型诊断并入库，在历史记录基础上递增"""
     global latest_result
     with inference_lock:
-        res = engine.analyze_audio_file(file_path, output_dir=RECORDS_DIR, generate_plot=True)
+        res = engine.analyze_audio_file(file_path, output_dir=None, generate_plot=False)
         if res.get("success", False):
             # 初始化复核字段
             format_review_info(res)
@@ -835,26 +837,155 @@ def api_upload():
         with processing_lock:
             processing_filenames.discard(fn)
 
-# 5. 静态资源免缓存路由
+# 5. 动态资源流式服务路由 (零落盘方案：按需从原始音频动态生成 WAV 与双面板时频谱图)
+_audio_file_index_cache = {}
+_plot_memory_cache = {}
+_wav_memory_cache = {}
+MAX_MEM_CACHE_ITEMS = 64
+
+def find_raw_audio_file(identifier):
+    """
+    根据文件名或词根毫秒级定位原始待测音频文件 (.bin 或 .wav)
+    支持自动穿透 incoming_audio/processed 各子分类目录、WATCH_DIR 及备用归档目录
+    """
+    global _audio_file_index_cache
+    stem = os.path.splitext(identifier)[0]
+    if stem.startswith("plot_"):
+        stem = stem[5:]
+    stem_clean = stem.strip()
+    
+    # 优先命中内存缓存
+    if stem_clean in _audio_file_index_cache:
+        cached_p = _audio_file_index_cache[stem_clean]
+        if os.path.exists(cached_p):
+            return cached_p
+            
+    search_dirs = [
+        PROCESSED_DIR,
+        WATCH_DIR,
+        RECORDS_DIR,
+        os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records"),
+        r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records",
+        r"P:\BaiduSyncdisk\022-collision_audio_system\incoming_audio\processed"
+    ]
+    
+    target_names = {
+        stem_clean.lower(),
+        f"{stem_clean}.bin".lower(),
+        f"{stem_clean}.wav".lower(),
+        f"{stem_clean}.WAV".lower(),
+        f"{stem_clean}.BIN".lower(),
+        identifier.lower()
+    }
+    
+    for base in search_dirs:
+        if not base or not os.path.isdir(base):
+            continue
+        for root, _, files in os.walk(base):
+            for f in files:
+                f_stem, _ = os.path.splitext(f)
+                f_lower = f.lower()
+                f_stem_lower = f_stem.lower()
+                
+                # 记录索引便于后续秒级命中
+                full_path = os.path.join(root, f)
+                _audio_file_index_cache[f_stem] = full_path
+                _audio_file_index_cache[f] = full_path
+                
+                if f_stem_lower in target_names or f_lower in target_names:
+                    _audio_file_index_cache[stem_clean] = full_path
+                    return full_path
+                    
+    return None
+
 @app.route("/records/<path:filename>")
 def serve_records(filename):
+    # 1. 兼容优先：如果 records 磁盘目录下碰巧有该实体文件，直接送出
     local_path = os.path.join(RECORDS_DIR, filename)
-    target_dir = RECORDS_DIR
-    if not os.path.exists(local_path):
-        fallback_dirs = [
-            os.path.join(CODE_BASE_DIR, "03_triple_model_realtime_monitor", "records"),
-            r"P:\BaiduSyncdisk\022-collision_audio_system\03_triple_model_realtime_monitor\records",
-            os.path.join(os.path.dirname(BASE_DIR), "03_triple_model_realtime_monitor", "records")
-        ]
-        for fb in fallback_dirs:
-            if os.path.exists(os.path.join(fb, filename)):
-                target_dir = fb
-                break
-    resp = send_from_directory(target_dir, filename)
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
+    if os.path.exists(local_path) and os.path.isfile(local_path):
+        resp = send_from_directory(RECORDS_DIR, filename)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+    # 2. 按需动态生成 WAV 试听音频流 (27ms 极速内存合成，0 磁盘占用)
+    if filename.lower().endswith(".wav"):
+        stem = os.path.splitext(filename)[0]
+        if stem in _wav_memory_cache:
+            wav_bytes = _wav_memory_cache[stem]
+            return Response(wav_bytes, mimetype="audio/wav", headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Length": str(len(wav_bytes)),
+                "Accept-Ranges": "bytes"
+            })
+            
+        src_path = find_raw_audio_file(filename)
+        if src_path:
+            try:
+                _, _, x_norm = engine.preprocess_audio_for_model(src_path, target_sr=engine.sr)
+                audio_i16 = np.clip(x_norm * 32767.0, -32768, 32767).astype("<i2")
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(engine.sr)
+                    wf.writeframes(audio_i16.tobytes())
+                wav_bytes = buf.getvalue()
+                
+                if len(_wav_memory_cache) >= MAX_MEM_CACHE_ITEMS:
+                    _wav_memory_cache.pop(next(iter(_wav_memory_cache)))
+                _wav_memory_cache[stem] = wav_bytes
+                
+                return Response(wav_bytes, mimetype="audio/wav", headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Content-Length": str(len(wav_bytes)),
+                    "Accept-Ranges": "bytes"
+                })
+            except Exception as e:
+                add_log("ERROR", f"动态生成 WAV 异常 [{filename}]: {e}")
+                return f"动态合成音频失败: {e}", 500
+
+    # 3. 按需动态生成 双面板时频谱诊断图 (纯内存渲染，0 磁盘占用)
+    if filename.lower().startswith("plot_") and filename.lower().endswith(".png"):
+        stem = filename[5:-4]
+        if stem in _plot_memory_cache:
+            png_bytes = _plot_memory_cache[stem]
+            return Response(png_bytes, mimetype="image/png", headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Length": str(len(png_bytes))
+            })
+            
+        src_path = find_raw_audio_file(stem)
+        if src_path:
+            try:
+                _, _, x_norm = engine.preprocess_audio_for_model(src_path, target_sr=engine.sr)
+                dur = len(x_norm) / engine.sr if len(x_norm) > 0 else 0.0
+                
+                # 从 SQLite 读取该样本已记录的诊断决策与指标
+                total_m, recs = db_mgr.query_records(search=stem, page=1, page_size=1)
+                rec = recs[0] if (recs and len(recs) > 0) else {
+                    "filename": os.path.basename(src_path),
+                    "consensus_level": "NORMAL",
+                    "alarm_votes": 0,
+                    "mean_confidence_pct": 0.0,
+                    "peak_amplitude": float(np.max(np.abs(x_norm))) if len(x_norm) > 0 else 0.0,
+                    "rms_amplitude": float(np.sqrt(np.mean(x_norm**2))) if len(x_norm) > 0 else 0.0
+                }
+                
+                png_bytes = engine.render_plot_bytes(x_norm, dur, rec)
+                
+                if len(_plot_memory_cache) >= MAX_MEM_CACHE_ITEMS:
+                    _plot_memory_cache.pop(next(iter(_plot_memory_cache)))
+                _plot_memory_cache[stem] = png_bytes
+                
+                return Response(png_bytes, mimetype="image/png", headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Content-Length": str(len(png_bytes))
+                })
+            except Exception as e:
+                add_log("ERROR", f"动态渲染频谱图异常 [{filename}]: {e}")
+                return f"动态生成频谱图失败: {e}", 500
+
+    return "文件不存在", 404
 
 # ---------------------------------------------------------------------------
 # 人工复核接口 (Manual Review API)

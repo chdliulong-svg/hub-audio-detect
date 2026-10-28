@@ -193,18 +193,9 @@ class TripleModelVoterEngine:
         quiet_msg = clip_rep.get("quiet_message", "") if clip_rep else ""
         step_rep = clip_rep.get("step_report", {}) if clip_rep else {}
         
-        # 2. 生成试听 WAV (如果指定 output_dir)
-        wav_rel_path = ""
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            wav_path = os.path.join(output_dir, f"{stem}.wav")
-            audio_i16 = np.clip(x_norm * 32767.0, -32768, 32767).astype("<i2")
-            with wave.open(wav_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(self.sr)
-                wf.writeframes(audio_i16.tobytes())
-            wav_rel_path = f"{stem}.wav"
+        # 2. 逻辑试听 WAV 与频谱图文件名 (零磁盘落盘，由服务端按需动态重绘/流式生成)
+        wav_rel_path = f"{stem}.wav"
+        plot_rel_name = f"plot_{stem}.png"
             
         # 第一道防线拦截: 硬件供电死锁
         if is_clip:
@@ -233,10 +224,10 @@ class TripleModelVoterEngine:
                 "is_alarm": False,
                 "infer_ms": infer_duration,
                 "wav_file": wav_rel_path,
-                "plot_file": ""
+                "plot_file": plot_rel_name
             }
             if generate_plot and output_dir:
-                result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+                self._render_plot(x_norm, dur, result, output_dir)
             return result
 
         # 第二道防线前置放行: 现场机组启动工况
@@ -268,10 +259,10 @@ class TripleModelVoterEngine:
                 "is_alarm": False,
                 "infer_ms": infer_duration,
                 "wav_file": wav_rel_path,
-                "plot_file": ""
+                "plot_file": plot_rel_name
             }
             if generate_plot and output_dir:
-                result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+                self._render_plot(x_norm, dur, result, output_dir)
             return result
 
         # 第二道防线前置放行: 现场机组停机工况
@@ -303,10 +294,10 @@ class TripleModelVoterEngine:
                 "is_alarm": False,
                 "infer_ms": infer_duration,
                 "wav_file": wav_rel_path,
-                "plot_file": ""
+                "plot_file": plot_rel_name
             }
             if generate_plot and output_dir:
-                result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+                self._render_plot(x_norm, dur, result, output_dir)
             return result
 
         # 第三道防线前置放行: 由 common 检测出的极低能量底噪与稳态杂音快速放行 (RMS < min_rms_thresh)
@@ -336,10 +327,10 @@ class TripleModelVoterEngine:
                 "is_alarm": False,
                 "infer_ms": infer_duration,
                 "wav_file": wav_rel_path,
-                "plot_file": ""
+                "plot_file": plot_rel_name
             }
             if generate_plot and output_dir:
-                result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+                self._render_plot(x_norm, dur, result, output_dir)
             return result
             
         # 3. 执行 3 模型切片推理 (2.0s 窗长 + 1.0s 步长 + 85/15 软加权聚合)
@@ -417,24 +408,21 @@ class TripleModelVoterEngine:
             "is_alarm": is_final_alarm,
             "infer_ms": infer_duration,
             "wav_file": wav_rel_path,
-            "plot_file": ""
+            "plot_file": plot_rel_name
         }
         
         if generate_plot and output_dir:
-            result["plot_file"] = self._render_plot(x_norm, dur, result, output_dir)
+            self._render_plot(x_norm, dur, result, output_dir)
             
         return result
 
-    def _render_plot(self, audio, dur, res, output_dir):
+    def render_plot_bytes(self, audio, dur, res, dpi=100):
         """
-        绘制专业双面板声学波形与 0~5000Hz STFT 能量时频谱诊断图
+        在纯内存中动态绘制双面板声学波形与 0~5000Hz STFT 能量时频谱诊断图，返回 PNG 字节流 (0 磁盘占用)
         """
-        fn = res["filename"]
-        stem = os.path.splitext(fn)[0]
-        plot_name = f"plot_{stem}.png"
-        plot_path = os.path.join(output_dir, plot_name)
-        
-        fig = plt.figure(figsize=(9.0, 4.6), dpi=120)
+        import io
+        fn = res.get("filename", "")
+        fig = plt.figure(figsize=(9.0, 4.6), dpi=dpi)
         gs = fig.add_gridspec(2, 1, height_ratios=[1, 1.8], hspace=0.32)
         
         ax_wave = fig.add_subplot(gs[0])
@@ -443,17 +431,17 @@ class TripleModelVoterEngine:
         t = np.linspace(0, dur, len(audio))
         
         # 颜色区分
-        if res["is_clipped"]:
+        if res.get("is_clipped"):
             accent = "#f43f5e"
         elif res.get("consensus_level") == "MACHINE_STARTUP_SAFE":
             accent = "#0284c7"  # 现场启动: 深天蓝
         elif res.get("consensus_level") == "MACHINE_SHUTDOWN_SAFE":
             accent = "#0d9488"  # 现场停机: 青绿
-        elif res["alarm_votes"] == 3:
+        elif res.get("alarm_votes") == 3:
             accent = "#ef4444"
-        elif res["alarm_votes"] == 2:
+        elif res.get("alarm_votes") == 2:
             accent = "#f97316"
-        elif res["alarm_votes"] == 1:
+        elif res.get("alarm_votes") == 1:
             accent = "#06b6d4"
         else:
             accent = "#10b981"
@@ -475,8 +463,14 @@ class TripleModelVoterEngine:
         ax_wave.grid(True, linestyle="--", alpha=0.3)
         ax_wave.tick_params(labelsize=7.5)
         
+        c_level = res.get("consensus_level", "NORMAL")
+        votes = res.get("alarm_votes", 0)
+        mean_c = res.get("mean_confidence_pct", 0.0)
+        peak_a = res.get("peak_amplitude", 0.0)
+        rms_a = res.get("rms_amplitude", 0.0)
+
         ax_wave.set_title(
-            f"[{res['consensus_level']}] {fn} | 票数: {res['alarm_votes']}/3 | 均值: {res['mean_confidence_pct']:.1f}% | 峰值: {res['peak_amplitude']:.3f} | RMS: {res['rms_amplitude']:.4f}",
+            f"[{c_level}] {fn} | 票数: {votes}/3 | 均值: {mean_c:.1f}% | 峰值: {peak_a:.3f} | RMS: {rms_a:.4f}",
             fontsize=8.5, fontweight="bold", loc="left", pad=4
         )
         
@@ -494,9 +488,23 @@ class TripleModelVoterEngine:
         cbar.set_label('能量谱强度 (dB)', fontsize=6.5)
         
         plt.subplots_adjust(top=0.92, bottom=0.14, left=0.08, right=0.96)
-        plt.savefig(plot_path, dpi=120, bbox_inches='tight')
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=dpi, bbox_inches='tight')
         plt.close(fig)
-        
+        buf.seek(0)
+        return buf.getvalue()
+
+    def _render_plot(self, audio, dur, res, output_dir):
+        """
+        绘制并落盘 (兼容显式落盘调用)
+        """
+        fn = res.get("filename", "audio")
+        stem = os.path.splitext(fn)[0]
+        plot_name = f"plot_{stem}.png"
+        plot_path = os.path.join(output_dir, plot_name)
+        png_data = self.render_plot_bytes(audio, dur, res)
+        with open(plot_path, "wb") as f:
+            f.write(png_data)
         return plot_name
 
     predict_audio_file = analyze_audio_file
