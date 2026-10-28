@@ -337,21 +337,7 @@
                             <th>03U (ECHOv2)</th>
                             <th>03R (GRAM-Mono)</th>
                             <th>峰值 / RMS</th>
-                            <th>
-                                <div class="th-filter-wrapper">
-                                    <span>仲裁决策状态</span>
-                                    <select id="thConsensusSelect" class="th-select-filter" onchange="handleSelectConsensusFilter(this.value)" title="直接按决策状态下拉筛选">
-                                        <option value="ALL">全部状态</option>
-                                        <option value="NORMAL_CLEAN_NOISE">🟢 NORMAL_CLEAN_NOISE</option>
-                                        <option value="CRITICAL_COLLISION_UNANIMOUS">🔴 全票确诊 (3票)</option>
-                                        <option value="MAJORITY_COLLISION_ALARM">🟠 多数确诊 (2票)</option>
-                                        <option value="ISOLATED_DISTURBANCE_SAFE">🟡 孤立扰动 (1票)</option>
-                                        <option value="MACHINE_STARTUP_SAFE">🚀 现场启动工况</option>
-                                        <option value="MACHINE_SHUTDOWN_SAFE">🛑 现场停机工况</option>
-                                        <option value="HARDWARE_CLIPPING_DISCARD">⚡ 幅值饱和</option>
-                                    </select>
-                                </div>
-                            </th>
+                            <th>诊断结论</th>
                             <th>人工复核结论</th>
                             <th>操作</th>
                         </tr>
@@ -514,7 +500,7 @@
                                 <th style="width: 70px;">03U</th>
                                 <th style="width: 70px;">03R</th>
                                 <th style="width: 110px;">峰值 / RMS</th>
-                                <th style="width: 140px;">仲裁决策状态</th>
+                                <th style="width: 140px;">诊断结论</th>
                                 <th style="width: 100px;">人工复核</th>
                                 <th style="width: 165px; text-align: center;">操作</th>
                             </tr>
