@@ -73,7 +73,7 @@ function updateSystemRunningStatus(isRunning) {
 
 async function fetchHistory() {
     try {
-        const res = await fetch('/api/history?limit=10000');
+        const res = await fetch('/api/history?limit=100');
         const data = await res.json();
         if (data && data.success) {
             historyRecords = data.records || [];
@@ -517,8 +517,10 @@ function selectKpiTab(tabKey, cardEl, openModal = true) {
     }
 }
 
+let kpiModalRecordsMap = {};
+
 // 打开分类详细文件信息模态框
-function openKpiDetailModal(tabKey) {
+async function openKpiDetailModal(tabKey) {
     currentKpiModalTab = tabKey || 'all';
     currentKpiModalSearch = '';
     const searchInput = document.getElementById('kpiModalSearchInput');
@@ -527,6 +529,20 @@ function openKpiDetailModal(tabKey) {
     renderKpiModalTable();
     const modal = document.getElementById('kpiDetailModal');
     if (modal) modal.style.display = 'flex';
+
+    // 若需要查看具体分类且数据量可能超过本地热缓存，异步从 SQLite 补充获取
+    if (tabKey && tabKey !== 'all') {
+        try {
+            const res = await fetch(`/api/history?limit=500&consensus=${tabKey}`);
+            const data = await res.json();
+            if (data && data.success && data.records) {
+                kpiModalRecordsMap[tabKey] = data.records;
+                renderKpiModalTable();
+            }
+        } catch (e) {
+            console.error('Fetch modal KPI records error:', e);
+        }
+    }
 }
 
 // 关闭模态框
@@ -559,8 +575,8 @@ function renderKpiModalTable() {
     if (modalTitle) modalTitle.innerText = `${cfg.name} · 详细文件信息清单`;
     if (modalIcon) modalIcon.innerText = cfg.icon;
 
-    // 1. 获取当前分类的基础样本集
-    const baseRecords = historyRecords.filter(cfg.filterCheck);
+    // 1. 获取当前分类的基础样本集 (优先使用从后端 SQLite 按需加载的完整分类记录)
+    const baseRecords = kpiModalRecordsMap[currentKpiModalTab] || historyRecords.filter(cfg.filterCheck);
     if (totalCountEl) totalCountEl.innerText = baseRecords.length;
 
     // 2. 搜索过滤

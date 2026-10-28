@@ -28,6 +28,7 @@ class DatabaseManager:
         self.lock = threading.Lock()
         self._backup_thread = None
         self._stop_backup = threading.Event()
+        self._kpi_cache = {"time": 0, "data": None}
         self.initialize()
 
     def get_connection(self):
@@ -176,6 +177,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 conn.execute(sql, data)
                 conn.commit()
+            self._kpi_cache["time"] = 0
 
     def batch_insert_records(self, record_dicts):
         """单事务批量高速灌入记录列表 (用于初始化导入与海量归档恢复)"""
@@ -223,6 +225,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 conn.executemany(sql, batch_data)
                 conn.commit()
+            self._kpi_cache["time"] = 0
         return len(batch_data)
 
     def get_records_count(self):
@@ -244,6 +247,100 @@ class DatabaseManager:
                 except Exception:
                     return None
             return None
+
+    def get_all_filenames(self):
+        """高效获取数据库中所有已处理的文件名集合 (用于冷热启动去重，毫秒级返回)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT filename FROM audio_records;")
+            return {row[0] for row in cursor.fetchall()}
+
+    def get_filename_to_level_map(self):
+        """获取所有文件名到判定工况的轻量字典映射 (用于归档目录整理)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT filename, consensus_level FROM audio_records;")
+            return {row[0]: row[1] for row in cursor.fetchall()}
+
+    def query_records(self, search="", consensus="ALL", review_status="ALL", date_filter="", page=1, page_size=50, limit=None, offset=None):
+        """
+        基于 SQLite 复合索引的高性能条件检索与分页查询 (0 内存浪费，毫秒级响应)
+        支持多维工况、关键词、复核状态、时间过滤。
+        返回 (total_count, records_list)
+        """
+        where = []
+        params = []
+
+        if search:
+            search_str = f"%{search.strip().lower()}%"
+            where.append("(LOWER(filename) LIKE ? OR LOWER(timestamp) LIKE ? OR LOWER(review_notes) LIKE ? OR LOWER(review_reviewer) LIKE ?)")
+            params.extend([search_str, search_str, search_str, search_str])
+
+        if date_filter:
+            df = date_filter.strip()
+            df_no_dash = df.replace("-", "")
+            where.append("(timestamp LIKE ? OR filename LIKE ?)")
+            params.extend([f"{df}%", f"%{df_no_dash}%"])
+
+        if consensus and consensus != "ALL":
+            c_up = consensus.upper()
+            if c_up in ("VOTE3", "CRITICAL_COLLISION_UNANIMOUS"):
+                where.append("(alarm_votes = 3 OR consensus_level = 'CRITICAL_COLLISION_UNANIMOUS')")
+            elif c_up in ("VOTE2", "MAJORITY_COLLISION_ALARM"):
+                where.append("(alarm_votes = 2 OR consensus_level = 'MAJORITY_COLLISION_ALARM')")
+            elif c_up in ("VOTE1", "SHIELDED", "ISOLATED_DISTURBANCE_SAFE"):
+                where.append("(alarm_votes = 1 OR consensus_level = 'ISOLATED_DISTURBANCE_SAFE')")
+            elif c_up in ("VOTE0", "NORMAL", "NORMAL_CLEAN_NOISE"):
+                where.append("(consensus_level = 'NORMAL_CLEAN_NOISE' OR (alarm_votes = 0 AND is_alarm = 0))")
+            elif c_up in ("ALARM", "ALARMS"):
+                where.append("is_alarm = 1")
+            elif c_up in ("CLIPPED", "HARDWARE_CLIPPING_DISCARD"):
+                where.append("(is_clipped = 1 OR consensus_level = 'HARDWARE_CLIPPING_DISCARD')")
+            elif c_up in ("STARTUP", "MACHINE_STARTUP_SAFE"):
+                where.append("(consensus_level = 'MACHINE_STARTUP_SAFE' OR review_status = 'CONFIRMED_STARTUP')")
+            elif c_up in ("SHUTDOWN", "MACHINE_SHUTDOWN_SAFE"):
+                where.append("(consensus_level = 'MACHINE_SHUTDOWN_SAFE' OR review_status = 'CONFIRMED_SHUTDOWN')")
+            else:
+                where.append("consensus_level = ?")
+                params.append(consensus)
+
+        if review_status and review_status != "ALL":
+            r_up = review_status.upper()
+            if r_up == "UNREVIEWED":
+                where.append("(review_status = 'UNREVIEWED' OR review_status = 'PENDING_REVIEW' OR review_status IS NULL)")
+            elif r_up == "REVIEWED":
+                where.append("(review_status != 'UNREVIEWED' AND review_status != 'PENDING_REVIEW' AND review_status IS NOT NULL)")
+            else:
+                where.append("review_status = ?")
+                params.append(review_status)
+
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) FROM audio_records{where_sql};", params)
+            total = cursor.fetchone()[0]
+
+            if limit is not None:
+                q_limit = max(1, min(1000, int(limit)))
+                q_offset = max(0, int(offset or 0))
+            else:
+                page = max(1, int(page or 1))
+                page_size = max(1, min(500, int(page_size or 50)))
+                q_limit = page_size
+                q_offset = (page - 1) * page_size
+
+            query_sql = f"SELECT raw_json FROM audio_records{where_sql} ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?;"
+            cursor.execute(query_sql, params + [q_limit, q_offset])
+            rows = cursor.fetchall()
+
+            records = []
+            for r in rows:
+                try:
+                    records.append(json.loads(r["raw_json"]))
+                except Exception:
+                    pass
+            return total, records
 
     def get_all_records(self, limit=50000):
         """按时间戳倒序返回完整遥测记录列表 (解析自 raw_json，保障 100% 格式无损)"""
@@ -308,7 +405,8 @@ class DatabaseManager:
                 WHERE filename = ?;
                 """, (status, reviewer, reviewed_at, notes, raw_json_str, filename))
                 conn.commit()
-                return True
+            self._kpi_cache["time"] = 0
+            return True
 
     def delete_record(self, filename):
         """根据文件名删除指定记录"""
@@ -318,7 +416,8 @@ class DatabaseManager:
                 cursor.execute("DELETE FROM audio_records WHERE filename = ?;", (filename,))
                 deleted = cursor.rowcount > 0
                 conn.commit()
-                return deleted
+            self._kpi_cache["time"] = 0
+            return deleted
 
     def clear_all_records(self):
         """清空全量记录"""
@@ -327,9 +426,14 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM audio_records;")
                 conn.commit()
+            self._kpi_cache["time"] = 0
 
-    def get_kpi_summary(self):
-        """超高速聚合大屏 KPI 统计指标 (SQL 聚合运算毫秒级返回)"""
+    def get_kpi_summary(self, cache_ttl=2.0):
+        """超高速聚合大屏 KPI 统计指标 (SQL 聚合运算毫秒级返回，带自适应轻量热缓存)"""
+        now = time.time()
+        if self._kpi_cache["data"] and (now - self._kpi_cache["time"] < cache_ttl):
+            return dict(self._kpi_cache["data"])
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -348,7 +452,7 @@ class DatabaseManager:
             FROM audio_records;
             """)
             r = cursor.fetchone()
-            return {
+            res = {
                 "total": r["total"] or 0,
                 "unanimous": r["unanimous"] or 0,
                 "majority": r["majority"] or 0,
@@ -361,6 +465,9 @@ class DatabaseManager:
                 "review_collision": r["review_collision"] or 0,
                 "review_false_alarm": r["review_false_alarm"] or 0
             }
+            self._kpi_cache["data"] = res
+            self._kpi_cache["time"] = now
+            return res
 
     # ---------------------------------------------------------------------------
     # 迁移与冷启动初始化

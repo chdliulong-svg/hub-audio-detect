@@ -383,17 +383,19 @@ add_log("INFO", "3 核心黄金铁三角模型 (03K Dasheng + 03U ECHOv2 + 03R G
 inference_lock = threading.Lock()
 processing_lock = threading.Lock()
 processing_filenames = set()
+# 内存轻量化：内存中只常驻最新 100 条热数据，海量历史交由 SQLite 索引，内存占用恒定
+MAX_HOT_CACHE_RECORDS = 100
 history_records = []
 latest_result = None
 is_algorithm_running = True
 
 def save_history():
-    """保存历史记录镜像至本地磁盘 (原子写入，保证外部工具读取兼容)"""
+    """轻量热数据快照：仅持久化最新 100 条热缓存，杜绝重复写入几十兆大文件阻塞 I/O"""
     try:
         os.makedirs(os.path.dirname(HISTORY_JSON), exist_ok=True)
         tmp_path = HISTORY_JSON + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(history_records[:50000], f, ensure_ascii=False, indent=2)
+            json.dump(history_records[:MAX_HOT_CACHE_RECORDS], f, ensure_ascii=False, indent=2)
         if os.path.exists(tmp_path):
             os.replace(tmp_path, HISTORY_JSON)
     except Exception as e:
@@ -418,7 +420,7 @@ def sync_processed_files_to_history():
     if not os.path.exists(PROCESSED_DIR):
         return
 
-    known_filenames = {r.get("filename") for r in history_records if "filename" in r}
+    known_filenames = db_mgr.get_all_filenames()
     new_records = []
     
     for sub, meta in DIR_TO_CONSENSUS.items():
@@ -476,8 +478,7 @@ def sync_processed_files_to_history():
     if new_records:
         # 批量写入 SQLite 数据库
         db_mgr.batch_insert_records(new_records)
-        history_records.extend(new_records)
-        history_records.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+        history_records = db_mgr.get_all_records(limit=MAX_HOT_CACHE_RECORDS)
         save_history()
         add_log("INFO", f"已从本地 processed 归档目录自动补充已处理音频并存入数据库: {len(new_records)} 条")
 
@@ -487,7 +488,8 @@ def load_initial_history_records():
     1. 优先读取 SQLite 数据库 records/history.db；
     2. 若数据库为空，自动从本地 records/history.json 或母本归档无损迁移；
     3. 补充已处理归档子目录中可能未入库的历史音频；
-    4. 启动后台定时自动无锁热备份守护线程。
+    4. 仅将最新 100 条热数据常驻内存，其余海量数据交由 SQLite 按需索引；
+    5. 启动后台定时自动无锁热备份守护线程。
     """
     global history_records, latest_result
     
@@ -524,21 +526,20 @@ def load_initial_history_records():
                             add_log("INFO", f"[💾 SQLite 引擎] 成功从母本 history.json 迁移恢复 {migrated} 条历史记录: {fb_path}")
                             break
 
-    # 2. 从数据库读取全量台账
-    loaded = db_mgr.get_all_records()
+    # 2. 从数据库读取最新热数据缓存 (只读最新 100 条常驻内存，内存开销减少 90% 以上且恒定)
+    loaded = db_mgr.get_all_records(limit=MAX_HOT_CACHE_RECORDS)
     for r in loaded:
         format_review_info(r)
         if r.get("consensus_level") == "HARDWARE_CLIPPING_DISCARD":
             r["consensus_title"] = "幅值饱和"
 
     history_records = loaded
+    latest_result = db_mgr.get_latest_record()
 
     # 3. 同步 processed 归档目录中遗留的有效音频
     sync_processed_files_to_history()
 
-    if history_records:
-        latest_result = history_records[0]
-    add_log("INFO", f"[💾 SQLite 引擎] 历史诊断记录就绪，数据库总行数: {db_mgr.get_records_count()} 条")
+    add_log("INFO", f"[💾 SQLite 引擎] 历史诊断记录就绪，数据库总行数: {db_mgr.get_records_count()} 条 (内存热缓存: {len(history_records)} 条)")
 
     # 4. 启动后台定时自动热备份守护线程
     interval_hours = float(DB_CFG.get("backup_interval_hours", 24))
@@ -552,7 +553,7 @@ def load_initial_history_records():
 
 # 启动时将 processed 根目录现存散落的文件按结果自动整理到分类子目录
 def organize_existing_processed_files():
-    fn_to_level = {r["filename"]: r.get("consensus_level", "NORMAL_CLEAN_NOISE") for r in history_records if "filename" in r}
+    fn_to_level = db_mgr.get_filename_to_level_map()
     try:
         if not os.path.exists(PROCESSED_DIR):
             return
@@ -593,7 +594,7 @@ def process_file_and_record(file_path):
                     break
 
             history_records.insert(0, res)
-            if len(history_records) > 50000:
+            if len(history_records) > MAX_HOT_CACHE_RECORDS:
                 history_records.pop()
             save_history()
             
@@ -705,17 +706,17 @@ def inject_system_context():
 # 1. 实时大屏页面
 @app.route("/")
 def index():
-    return render_template("index.html", config=CONFIG)
+    return render_template("index.html", config=CONFIG, system_version=SYSTEM_VERSION, version_info=VERSION_INFO)
 
 # 2. 后台管理页面与分析统计页面
 @app.route("/admin")
 def admin_page():
     active_tab = request.args.get("tab", "records")
-    return render_template("admin.html", config=CONFIG, active_tab=active_tab)
+    return render_template("admin.html", config=CONFIG, active_tab=active_tab, system_version=SYSTEM_VERSION, version_info=VERSION_INFO)
 
 @app.route("/analytics")
 def analytics_page():
-    return render_template("admin.html", config=CONFIG, active_tab="analytics")
+    return render_template("admin.html", config=CONFIG, active_tab="analytics", system_version=SYSTEM_VERSION, version_info=VERSION_INFO)
 
 # 3. 实时遥测数据接口
 @app.route("/api/latest", methods=["GET"])
@@ -754,32 +755,27 @@ def api_latest():
 
 @app.route("/api/history", methods=["GET"])
 def api_history():
-    limit = request.args.get("limit", default=10000, type=int)
+    limit = int(request.args.get("limit", default=100))
+    limit = max(1, min(500, limit))
+    consensus = request.args.get("consensus", "ALL").strip()
+    search = request.args.get("search", "").strip()
     
-    total = len(history_records)
-    unanimous = sum(1 for r in history_records if r.get("alarm_votes") == 3)
-    majority = sum(1 for r in history_records if r.get("alarm_votes") == 2 and r.get("is_alarm", False))
-    shielded = sum(1 for r in history_records if r.get("consensus_level") == "ISOLATED_DISTURBANCE_SAFE")
-    normal = sum(1 for r in history_records if r.get("consensus_level") == "NORMAL_CLEAN_NOISE")
-    clipped = sum(1 for r in history_records if r.get("is_clipped", False))
-    startup = sum(1 for r in history_records if r.get("consensus_level") == "MACHINE_STARTUP_SAFE")
-    shutdown = sum(1 for r in history_records if r.get("consensus_level") == "MACHINE_SHUTDOWN_SAFE")
-
-    recs = history_records[:limit] if limit > 0 else history_records
+    # 毫秒级直接从 SQLite 聚合统计全量 KPI，0 内存浪费
+    kpi = db_mgr.get_kpi_summary()
+    total = kpi.get("total", 0)
+    
+    # 若无特定筛选且在热缓存范围内，直接从内存极速返回
+    if (not consensus or consensus.upper() == "ALL") and not search and limit <= len(history_records):
+        recs = history_records[:limit]
+    else:
+        # 否则基于 SQLite 复合索引极速按需检索匹配记录
+        _, recs = db_mgr.query_records(search=search, consensus=consensus, limit=limit)
+        
     return jsonify({
         "success": True,
         "total": total,
         "is_algorithm_running": is_algorithm_running,
-        "kpi": {
-            "total": total,
-            "unanimous": unanimous,
-            "majority": majority,
-            "shielded": shielded,
-            "normal": normal,
-            "clipped": clipped,
-            "startup": startup,
-            "shutdown": shutdown
-        },
+        "kpi": kpi,
         "records": recs
     })
 
@@ -859,36 +855,41 @@ def api_records_review():
     status_info = REVIEW_STATUS_MAP[status]
     now_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
+    rev_dict = {
+        "status": status,
+        "status_text": status_info["text"],
+        "badge_class": status_info["badge"],
+        "reviewer": reviewer,
+        "reviewed_at": now_str,
+        "notes": notes
+    }
+
+    # 1. 事务持久化至 SQLite 数据库 (确保全量历史任意记录复核不丢失)
+    db_updated = False
+    try:
+        db_updated = db_mgr.update_review(fn, status, reviewer, now_str, notes)
+    except Exception as dbe:
+        add_log("ERROR", f"同步复核至数据库失败: {dbe}")
+
+    # 2. 同步更新内存热缓存
     matched = None
     with inference_lock:
         for r in history_records:
             if r.get("filename") == fn and (not ts or r.get("timestamp") == ts):
-                r["review"] = {
-                    "status": status,
-                    "status_text": status_info["text"],
-                    "badge_class": status_info["badge"],
-                    "reviewer": reviewer,
-                    "reviewed_at": now_str,
-                    "notes": notes
-                }
+                r["review"] = rev_dict
                 matched = r
                 break
-        
-        if matched:
-            try:
-                db_mgr.update_review(fn, status, reviewer, now_str, notes)
-            except Exception as dbe:
-                add_log("ERROR", f"同步复核至数据库失败: {dbe}")
-            save_history()
-            if latest_result and latest_result.get("filename") == fn:
-                latest_result["review"] = matched["review"]
+        if latest_result and latest_result.get("filename") == fn:
+            latest_result["review"] = rev_dict
+        save_history()
 
-    if matched:
+    if db_updated or matched:
         add_log("INFO", f"[✍️ 人工复核] 文件 {fn} 审核结论: 【{status_info['text']}】(审核员: {reviewer}) 备注: {notes or '无'}")
         return jsonify({
             "success": True,
-            "record": matched,
-            "review": matched["review"]
+            "filename": fn,
+            "record": matched or {"filename": fn, "review": rev_dict},
+            "review": rev_dict
         })
     return jsonify({"success": False, "error": "未找到匹配记录"}), 404
 
@@ -943,7 +944,7 @@ def api_admin_logs_download():
 
 @app.route("/api/admin/records", methods=["GET"])
 def api_admin_records():
-    """获取管理端诊断记录列表 (支持分页与多维筛选)"""
+    """获取管理端诊断记录列表 (基于 SQLite 复合索引的高速分页与多维筛选)"""
     search = request.args.get("search", "").strip().lower()
     consensus = request.args.get("consensus", "ALL").upper()
     rev_filter = request.args.get("review_status", "ALL").upper()
@@ -951,53 +952,17 @@ def api_admin_records():
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("page_size", 50))
 
-    filtered = []
-    for r in history_records:
+    total, paginated = db_mgr.query_records(
+        search=search,
+        consensus=consensus,
+        review_status=rev_filter,
+        date_filter=date_filter,
+        page=page,
+        page_size=page_size
+    )
+
+    for r in paginated:
         format_review_info(r)
-        
-        if search and search not in r.get("filename", "").lower() and search not in r.get("timestamp", ""):
-            continue
-
-        if date_filter:
-            d_no_h = date_filter.replace("-", "")
-            ts_hit = r.get("timestamp", "").startswith(date_filter)
-            fn_hit = d_no_h in r.get("filename", "")
-            if not ts_hit and not fn_hit:
-                continue
-        
-        if consensus != "ALL":
-            if consensus == "ALARM" and not r.get("is_alarm", False):
-                continue
-            elif consensus == "VOTE3" and r.get("alarm_votes") != 3 and r.get("consensus_level") != "CRITICAL_COLLISION_UNANIMOUS":
-                continue
-            elif consensus == "VOTE2" and r.get("alarm_votes") != 2 and r.get("consensus_level") != "MAJORITY_COLLISION_ALARM":
-                continue
-            elif consensus == "SHIELDED" and r.get("consensus_level") != "ISOLATED_DISTURBANCE_SAFE" and r.get("alarm_votes") != 1:
-                continue
-            elif consensus == "NORMAL" and r.get("consensus_level") != "NORMAL_CLEAN_NOISE" and r.get("alarm_votes") != 0:
-                continue
-            elif consensus == "STARTUP" and r.get("consensus_level") != "MACHINE_STARTUP_SAFE" and r.get("review", {}).get("status") != "CONFIRMED_STARTUP":
-                continue
-            elif consensus == "SHUTDOWN" and r.get("consensus_level") != "MACHINE_SHUTDOWN_SAFE" and r.get("review", {}).get("status") != "CONFIRMED_SHUTDOWN":
-                continue
-            elif consensus == "CLIPPED" and not r.get("is_clipped", False):
-                continue
-
-        if rev_filter != "ALL":
-            cur_rev = r.get("review", {}).get("status", "UNREVIEWED")
-            if rev_filter == "UNREVIEWED" and cur_rev != "UNREVIEWED":
-                continue
-            elif rev_filter == "REVIEWED" and cur_rev == "UNREVIEWED":
-                continue
-            elif rev_filter in REVIEW_STATUS_MAP and cur_rev != rev_filter:
-                continue
-
-        filtered.append(r)
-
-    total = len(filtered)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated = filtered[start_idx:end_idx]
 
     return jsonify({
         "success": True,
@@ -1018,31 +983,28 @@ def api_admin_records_delete():
     if not fn:
         return jsonify({"success": False, "error": "未提供文件名"}), 400
 
-    deleted = False
+    deleted = db_mgr.delete_record(fn)
     with inference_lock:
         for i, r in enumerate(history_records):
             if r.get("filename") == fn and (not ts or r.get("timestamp") == ts):
                 history_records.pop(i)
                 deleted = True
                 break
-        if deleted:
-            try:
-                db_mgr.delete_record(fn)
-            except Exception as dbe:
-                add_log("ERROR", f"从数据库删除记录失败: {dbe}")
-            save_history()
-            if latest_result and latest_result.get("filename") == fn:
-                latest_result = history_records[0] if history_records else None
-            add_log("WARN", f"管理员删除了历史记录: {fn} ({ts or ''})")
-            return jsonify({"success": True, "msg": f"记录 {fn} 已删除"})
-        return jsonify({"success": False, "error": "未匹配到指定记录"}), 404
+        if latest_result and latest_result.get("filename") == fn:
+            latest_result = history_records[0] if history_records else db_mgr.get_latest_record()
+        save_history()
+
+    if deleted:
+        add_log("WARN", f"管理员删除了历史记录: {fn} ({ts or ''})")
+        return jsonify({"success": True, "msg": f"记录 {fn} 已删除"})
+    return jsonify({"success": False, "error": "未匹配到指定记录"}), 404
 
 @app.route("/api/admin/records/clear_all", methods=["POST"])
 def api_admin_records_clear_all():
     """清空所有历史记录"""
     global history_records, latest_result
     with inference_lock:
-        count = len(history_records)
+        count = db_mgr.get_records_count()
         history_records = []
         latest_result = None
         try:
@@ -1181,8 +1143,7 @@ def api_admin_analytics():
     end_date = request.args.get("end_date", "").strip()
     consensus_filter = request.args.get("consensus", "ALL").upper()
 
-    with inference_lock:
-        records_snapshot = list(history_records)
+    records_snapshot = db_mgr.get_all_records()
 
     parsed = []
     all_dates_set = set()
@@ -1700,7 +1661,7 @@ def api_admin_system_status():
                 "process_memory_mb": proc_mem_mb,
                 "records_file_count": records_file_count,
                 "records_size_mb": records_size_mb,
-                "total_history_count": len(history_records),
+                "total_history_count": db_mgr.get_records_count(),
                 "total_logs_count": len(system_logs),
                 "subdir_stats": subdir_stats,
                 "models": {
