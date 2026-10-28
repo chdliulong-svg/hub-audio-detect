@@ -662,6 +662,46 @@ watcher_thread.start()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
+# ---------------------------------------------------------------------------
+# 系统版本与构建信息管理
+# ---------------------------------------------------------------------------
+APP_VERSION = "v3.2.0"
+
+def get_system_version_info():
+    """获取当前系统语义化版本号、Git 构建哈希与提交时间"""
+    short_commit = ""
+    commit_date = ""
+    try:
+        import subprocess
+        p = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=APP_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.5)
+        if p.returncode == 0:
+            short_commit = p.stdout.strip()
+        p2 = subprocess.run(["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d"], cwd=APP_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.5)
+        if p2.returncode == 0:
+            commit_date = p2.stdout.strip()
+    except Exception:
+        pass
+    
+    display = f"{APP_VERSION} ({short_commit})" if short_commit else APP_VERSION
+    return {
+        "version": APP_VERSION,
+        "commit": short_commit,
+        "commit_date": commit_date,
+        "display": display
+    }
+
+VERSION_INFO = get_system_version_info()
+SYSTEM_VERSION = VERSION_INFO["display"]
+
+@app.context_processor
+def inject_system_context():
+    """为全量 Jinja2 HTML 模板全局注入版本上下文变量"""
+    return {
+        "app_version": APP_VERSION,
+        "system_version": SYSTEM_VERSION,
+        "version_info": VERSION_INFO
+    }
+
 # 1. 实时大屏页面
 @app.route("/")
 def index():
@@ -684,11 +724,15 @@ def api_latest():
         res = dict(latest_result)
         res["is_algorithm_running"] = is_algorithm_running
         res["watch_dir"] = MONITOR_CFG.get("watch_dir", "incoming_audio")
+        res["system_version"] = SYSTEM_VERSION
+        res["app_version"] = APP_VERSION
         return jsonify(res)
     return jsonify({
         "success": False,
         "is_algorithm_running": is_algorithm_running,
         "watch_dir": MONITOR_CFG.get("watch_dir", "incoming_audio"),
+        "system_version": SYSTEM_VERSION,
+        "app_version": APP_VERSION,
         "filename": "等待音频流输入...",
         "consensus_level": "NORMAL_CLEAN_NOISE",
         "consensus_title": "系统待机中，等待 incoming_audio 音频注入或手动投递..." if is_algorithm_running else "【算法已暂停】检测系统已停止，等待管理员启动...",
@@ -1668,6 +1712,9 @@ def api_admin_system_status():
                 "watch_dir_abs": WATCH_DIR,
                 "processed_dir": MONITOR_CFG.get("processed_dir", "incoming_audio/processed"),
                 "processed_dir_abs": PROCESSED_DIR,
+                "system_version": SYSTEM_VERSION,
+                "app_version": APP_VERSION,
+                "version_info": VERSION_INFO,
                 "alarm_threshold_pct": engine.alarm_thresh_pct,
                 "min_rms_threshold": getattr(engine, "min_rms_thresh", 0.02),
                 "scan_interval_sec": MONITOR_CFG.get("scan_interval_sec", 1.0),
@@ -1975,7 +2022,7 @@ if __name__ == "__main__":
     threads = int(SERVER_CFG.get("wsgi_threads", 8))
     
     print("=" * 70)
-    print(f">> [3-Model Realtime Monitor] 工业级声学实时监控服务启动中...")
+    print(f">> [3-Model Realtime Monitor] 工业级声学实时监控服务启动中 (版本: {SYSTEM_VERSION})...")
     print(f">> 监控网页端控制台: http://{host}:{port}")
     print(f">> 后台管理中心页面: http://{host}:{port}/admin")
     print("=" * 70 + "\n")

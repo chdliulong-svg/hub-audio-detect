@@ -927,7 +927,9 @@ async function checkSystemUpdate(isSilent = false) {
         const json = await res.json();
         if (json.success && json.data) {
             const d = json.data;
-            if (localShaEl) localShaEl.innerText = d.local_commit || '未知';
+            if (localShaEl) {
+                localShaEl.innerText = d.version ? `${d.version} (${d.local_commit || 'git'})` : (d.local_commit || '未知');
+            }
             if (localMsgEl) localMsgEl.innerText = d.local_msg || '';
 
             if (d.error) {

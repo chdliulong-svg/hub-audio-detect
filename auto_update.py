@@ -85,10 +85,13 @@ def run_git_cmd(args, timeout=25):
     except Exception as e:
         return -1, "", str(e)
 
+APP_VERSION = "v3.2.0"
+
 def check_for_updates():
     """
     检查远程是否有新版本
     返回 dict: {
+        "version": str,
         "has_update": bool,
         "local_commit": str,
         "remote_commit": str,
@@ -99,6 +102,7 @@ def check_for_updates():
     }
     """
     result = {
+        "version": APP_VERSION,
         "has_update": False,
         "local_commit": "",
         "remote_commit": "",

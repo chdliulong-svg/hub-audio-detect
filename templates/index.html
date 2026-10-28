@@ -29,6 +29,10 @@
             <div class="node-pill" title="自动归档: {{ config.monitor.watch_dir }}/processed">
                 <span>📂 监听目录: <code id="headerWatchDirCode">{{ config.monitor.watch_dir }}</code></span>
             </div>
+            <div class="node-pill version-pill" title="系统软件版本: {{ system_version }}">
+                <span class="node-icon">🏷️</span>
+                <span>版本: <strong style="color: #2563eb;">{{ system_version }}</strong></span>
+            </div>
         </div>
         <div class="header-right">
             <input type="file" id="audioUploadInput" accept=".wav,.bin,.WAV,.BIN,audio/wav,audio/x-wav,application/octet-stream" style="display:none" onchange="handleManualUpload(this)">
@@ -510,6 +514,17 @@
             </div>
         </div>
     </div>
+
+    <!-- System Version & Industrial Status Footer -->
+    <footer class="app-footer">
+        <div class="footer-content">
+            <span>风电机组碰撞声学智能诊断系统 · 3核心声学大模型 (03K + 03U + 03R) 协同投票架构</span>
+            <span class="footer-divider">|</span>
+            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version }}</strong></span>
+            <span class="footer-divider">|</span>
+            <span>工业级边缘计算就绪 (Waitress WSGI + SQLite WAL)</span>
+        </div>
+    </footer>
 
     <script src="/static/js/monitor.js?v=3.1"></script>
 </body>

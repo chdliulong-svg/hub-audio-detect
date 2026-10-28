@@ -22,6 +22,10 @@
             <div class="node-pill">
                 <span>监测节点: <strong>{{ config.turbine_node }}</strong></span>
             </div>
+            <div class="node-pill version-pill" title="系统软件版本: {{ system_version }}">
+                <span class="node-icon">🏷️</span>
+                <span>版本: <strong style="color: #2563eb;">{{ system_version }}</strong></span>
+            </div>
         </div>
         <div class="header-right" style="gap:10px; align-items:center;">
             <div id="headerAlgoStatusBox" style="display:flex; align-items:center; gap:8px;">
@@ -546,6 +550,15 @@
                     </div>
                 </div>
 
+                <div class="metric-card" style="border-left: 3px solid #6366f1;">
+                    <div class="m-icon">🏷️</div>
+                    <div class="m-info">
+                        <span class="m-lbl">系统版本与架构</span>
+                        <span class="m-val" id="sysVersionVal" style="font-size:16px;color:#4338ca;">{{ system_version }}</span>
+                        <span class="m-sub" id="sysVersionSub">生产级 WSGI (Waitress) + SQLite WAL</span>
+                    </div>
+                </div>
+
             </div>
 
             <!-- Configuration & Engine Parameters Form -->
@@ -774,8 +787,8 @@
                         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px;">
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
                                 <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">当前本地版本</span>
-                                <strong id="updateLocalSha" style="font-family:var(--font-mono); font-size:13.5px; color:var(--text-main);">检测中...</strong>
-                                <div id="updateLocalMsg" style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</div>
+                                <strong id="updateLocalSha" style="font-family:var(--font-mono); font-size:13.5px; color:var(--text-main);">{{ system_version }}</strong>
+                                <div id="updateLocalMsg" style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ version_info.commit_date }} (Git SHA: {{ version_info.commit }})</div>
                             </div>
                             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
                                 <span style="font-size:11.5px; color:var(--text-muted); display:block; margin-bottom:4px;">GitHub 远程版本</span>
@@ -919,6 +932,17 @@
             </div>
         </div>
     </div>
+
+    <!-- System Version & Industrial Status Footer -->
+    <footer class="app-footer">
+        <div class="footer-content">
+            <span>风电机组碰撞声学智能诊断系统 · 后台管理中心</span>
+            <span class="footer-divider">|</span>
+            <span>系统版本: <strong style="color: #2563eb; font-family: var(--font-mono);">{{ system_version }}</strong></span>
+            <span class="footer-divider">|</span>
+            <span>工业级边缘计算就绪 (Waitress WSGI + SQLite WAL)</span>
+        </div>
+    </footer>
 
     <script src="/static/js/chart.min.js"></script>
     <script src="/static/js/admin.js?v=2.0"></script>
