@@ -159,16 +159,12 @@ function updateKPICounters(kpiOrRecords) {
         majority = kpiOrRecords.majority || 0;
         shielded = kpiOrRecords.shielded || 0;
         normal = kpiOrRecords.normal || 0;
-        startup = kpiOrRecords.startup || 0;
-        shutdown = kpiOrRecords.shutdown || 0;
     } else if (Array.isArray(kpiOrRecords)) {
         total = kpiOrRecords.length;
         unanimous = kpiOrRecords.filter(r => r.alarm_votes === 3).length;
         majority = kpiOrRecords.filter(r => r.alarm_votes === 2 && r.is_alarm).length;
         shielded = kpiOrRecords.filter(r => r.consensus_level === 'ISOLATED_DISTURBANCE_SAFE').length;
-        normal = kpiOrRecords.filter(r => r.consensus_level === 'NORMAL_CLEAN_NOISE').length;
-        startup = kpiOrRecords.filter(r => r.consensus_level === 'MACHINE_STARTUP_SAFE').length;
-        shutdown = kpiOrRecords.filter(r => r.consensus_level === 'MACHINE_SHUTDOWN_SAFE').length;
+        normal = kpiOrRecords.filter(r => r.consensus_level === 'NORMAL_CLEAN_NOISE' || r.alarm_votes === 0).length;
     }
 
     if (document.getElementById('kpiTotal')) document.getElementById('kpiTotal').innerHTML = `${total} <span class="kpi-unit">份</span>`;
@@ -176,8 +172,6 @@ function updateKPICounters(kpiOrRecords) {
     if (document.getElementById('kpiMajority')) document.getElementById('kpiMajority').innerHTML = `${majority} <span class="kpi-unit">份</span>`;
     if (document.getElementById('kpiShielded')) document.getElementById('kpiShielded').innerHTML = `${shielded} <span class="kpi-unit">次</span>`;
     if (document.getElementById('kpiNormal')) document.getElementById('kpiNormal').innerHTML = `${normal} <span class="kpi-unit">份</span>`;
-    if (document.getElementById('kpiStartup')) document.getElementById('kpiStartup').innerHTML = `${startup} <span class="kpi-unit">次</span>`;
-    if (document.getElementById('kpiShutdown')) document.getElementById('kpiShutdown').innerHTML = `${shutdown} <span class="kpi-unit">次</span>`;
 }
 
 function updateHeroView(data) {
@@ -198,12 +192,6 @@ function updateHeroView(data) {
     } else if (data.consensus_level === 'ISOLATED_DISTURBANCE_SAFE') {
         banner.classList.add('state-safe');
         icon = '🛡️';
-    } else if (data.consensus_level === 'MACHINE_STARTUP_SAFE') {
-        banner.classList.add('state-startup');
-        icon = '🚀';
-    } else if (data.consensus_level === 'MACHINE_SHUTDOWN_SAFE') {
-        banner.classList.add('state-shutdown');
-        icon = '🛑';
     } else if (data.consensus_level === 'HARDWARE_CLIPPING_DISCARD') {
         banner.classList.add('state-crit');
         icon = '⚡';
@@ -577,20 +565,6 @@ const KPI_TAB_CONFIG = {
         desc: '0/3 票全票安全放行，机组平稳运行背景底噪',
         filterKey: 'vote0',
         filterCheck: (r) => r.alarm_votes === 0 || r.consensus_level === 'NORMAL_CLEAN_NOISE'
-    },
-    'startup': {
-        name: '现场机组启动工况',
-        icon: '🚀',
-        desc: 'CPD 变点检测算法检出阶跃爬升工况，判定为起机并网提速，安全放行不误报',
-        filterKey: 'startup',
-        filterCheck: (r) => r.consensus_level === 'MACHINE_STARTUP_SAFE' || (r.review && r.review.status === 'CONFIRMED_STARTUP')
-    },
-    'shutdown': {
-        name: '现场机组停机工况',
-        icon: '🛑',
-        desc: 'CPD 变点检测算法检出能量单向跳水跌落工况，判定为刹车脱网或惰行停机，安全放行不误报',
-        filterKey: 'shutdown',
-        filterCheck: (r) => r.consensus_level === 'MACHINE_SHUTDOWN_SAFE' || (r.review && r.review.status === 'CONFIRMED_SHUTDOWN')
     }
 };
 
@@ -625,8 +599,6 @@ function selectKpiTab(tabKey, cardEl, openModal = true) {
         else if (tabKey === 'vote3') thSel.value = 'CRITICAL_COLLISION_UNANIMOUS';
         else if (tabKey === 'vote2') thSel.value = 'MAJORITY_COLLISION_ALARM';
         else if (tabKey === 'vote1') thSel.value = 'ISOLATED_DISTURBANCE_SAFE';
-        else if (tabKey === 'startup') thSel.value = 'MACHINE_STARTUP_SAFE';
-        else if (tabKey === 'shutdown') thSel.value = 'MACHINE_SHUTDOWN_SAFE';
         else thSel.value = 'ALL';
     }
 

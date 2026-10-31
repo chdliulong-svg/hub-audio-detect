@@ -519,8 +519,8 @@ class DatabaseManager:
                 SUM(CASE WHEN consensus_level = 'SHIELDED_ISOLATED_DISTURBANCE' OR alarm_votes = 1 THEN 1 ELSE 0 END) as shielded,
                 SUM(CASE WHEN consensus_level = 'NORMAL_CLEAN_NOISE' THEN 1 ELSE 0 END) as normal,
                 SUM(CASE WHEN is_clipped = 1 OR consensus_level = 'HARDWARE_CLIPPING_DISCARD' THEN 1 ELSE 0 END) as clipped,
-                SUM(CASE WHEN consensus_level = 'MACHINE_STARTUP_SAFE' THEN 1 ELSE 0 END) as startup,
-                SUM(CASE WHEN consensus_level = 'MACHINE_SHUTDOWN_SAFE' THEN 1 ELSE 0 END) as shutdown,
+                0 as startup,
+                0 as shutdown,
                 SUM(CASE WHEN review_status != 'PENDING_REVIEW' AND review_status != 'UNREVIEWED' THEN 1 ELSE 0 END) as reviewed,
                 SUM(CASE WHEN review_status = 'CONFIRMED_COLLISION' THEN 1 ELSE 0 END) as review_collision,
                 SUM(CASE WHEN review_status = 'FALSE_ALARM_INTERCEPT' THEN 1 ELSE 0 END) as review_false_alarm

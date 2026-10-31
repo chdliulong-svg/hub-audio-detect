@@ -94,14 +94,12 @@
                     <div class="ana-control-group">
                         <span class="ana-control-label">工况类型:</span>
                         <select id="anaCategorySelect" class="ana-select-input" onchange="loadAnalyticsData()">
-                            <option value="ALL">全部工况类型 (全量 7 类)</option>
+                            <option value="ALL">全部工况类型 (全量 5 类)</option>
                             <option value="CRITICAL_COLLISION_UNANIMOUS">🔴 全票确诊碰撞 (3票)</option>
                             <option value="MAJORITY_COLLISION_ALARM">🟠 多数表决碰撞 (2票)</option>
                             <option value="ISOLATED_DISTURBANCE_SAFE">🟡 孤立扰动拦截 (1票)</option>
                             <option value="NORMAL_CLEAN_NOISE">🟢 正常平稳底噪 (0票)</option>
                             <option value="HARDWARE_CLIPPING_DISCARD">🟣 幅值饱和</option>
-                            <option value="MACHINE_STARTUP_SAFE">🚀 现场机组启动工况</option>
-                            <option value="MACHINE_SHUTDOWN_SAFE">🛑 现场机组停机工况</option>
                         </select>
                     </div>
                 </div>
@@ -147,11 +145,11 @@
 
                 <div class="ana-kpi-card normal">
                     <div class="ana-kpi-header">
-                        <span class="ana-kpi-title">正常工况与启停放行</span>
+                        <span class="ana-kpi-title">正常平稳运转放行</span>
                         <span class="ana-kpi-icon">✅</span>
                     </div>
                     <div class="ana-kpi-value"><strong id="anaStatSafe">--</strong> <span class="ana-kpi-unit">份</span></div>
-                    <div class="ana-kpi-sub">平稳底噪: <span id="anaStatNormal">--</span> | 启停机: <span id="anaStatStates">--</span></div>
+                    <div class="ana-kpi-sub">基座平稳运行无冲击</div>
                 </div>
 
                 <div class="ana-kpi-card clip">
@@ -357,8 +355,6 @@
                             <button class="admin-filter-pill" onclick="setRecordConsensus('VOTE2', this)">🟠 多数表决 (2票)</button>
                             <button class="admin-filter-pill" onclick="setRecordConsensus('SHIELDED', this)">🟡 孤立扰动 (1票)</button>
                             <button class="admin-filter-pill" onclick="setRecordConsensus('NORMAL', this)">🟢 平稳底噪 (0票)</button>
-                            <button class="admin-filter-pill" onclick="setRecordConsensus('STARTUP', this)">🚀 现场启动</button>
-                            <button class="admin-filter-pill" onclick="setRecordConsensus('SHUTDOWN', this)">🛑 现场停机</button>
                             <button class="admin-filter-pill" onclick="setRecordConsensus('CLIPPED', this)">🟣 幅值饱和</button>
                         </div>
                         <div class="filter-pills">

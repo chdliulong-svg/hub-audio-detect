@@ -87,22 +87,6 @@
                 <div class="kpi-value normal-text" id="kpiNormal">0 <span class="kpi-unit">份</span></div>
                 <div class="kpi-click-hint">点击查看清单 ➔</div>
             </div>
-            <div class="kpi-card card-startup" id="kpiCard-startup" onclick="selectKpiTab('startup', this)" title="点击查看现场机组启动工况文件详细信息">
-                <div class="kpi-header">
-                    <span class="kpi-label">现场机组启动工况</span>
-                    <span class="kpi-icon">🚀</span>
-                </div>
-                <div class="kpi-value startup-text" id="kpiStartup">0 <span class="kpi-unit">次</span></div>
-                <div class="kpi-click-hint">点击查看清单 ➔</div>
-            </div>
-            <div class="kpi-card card-shutdown" id="kpiCard-shutdown" onclick="selectKpiTab('shutdown', this)" title="点击查看现场机组停机工况文件详细信息">
-                <div class="kpi-header">
-                    <span class="kpi-label">现场机组停机工况</span>
-                    <span class="kpi-icon">🛑</span>
-                </div>
-                <div class="kpi-value shutdown-text" id="kpiShutdown">0 <span class="kpi-unit">次</span></div>
-                <div class="kpi-click-hint">点击查看清单 ➔</div>
-            </div>
         </section>
 
         <!-- Playback Mode Sticky Notice (shown only when replaying historical records) -->
@@ -296,8 +280,6 @@
                         <button class="filter-btn" onclick="setHistoryFilter('vote2', this)">🟠 多数表决 (2票)</button>
                         <button class="filter-btn" onclick="setHistoryFilter('vote1', this)">🟡 孤立扰动 (1票)</button>
                         <button class="filter-btn" onclick="setHistoryFilter('vote0', this)">🟢 平稳底噪 (0票)</button>
-                        <button class="filter-btn" onclick="setHistoryFilter('startup', this)">🚀 现场启动</button>
-                        <button class="filter-btn" onclick="setHistoryFilter('shutdown', this)">🛑 现场停机</button>
                         <button class="filter-btn" onclick="setHistoryFilter('unreviewed', this)">⏳ 待复核</button>
                         <button class="filter-btn" onclick="setHistoryFilter('reviewed', this)">✅ 已复核</button>
                     </div>
@@ -433,14 +415,6 @@
                         <div class="review-option-card" id="opt-CONFIRMED_NORMAL" onclick="selectReviewOption('CONFIRMED_NORMAL')">
                             <div class="review-option-title" style="color:#16a34a">🟢 确认正常运转</div>
                             <div class="review-option-desc">设备健康平稳运行，无任何异常振动碰撞</div>
-                        </div>
-                        <div class="review-option-card" id="opt-CONFIRMED_STARTUP" onclick="selectReviewOption('CONFIRMED_STARTUP')">
-                            <div class="review-option-title" style="color:#0284c7">🚀 确认现场启动</div>
-                            <div class="review-option-desc">风电机组/机电系统正常并网、起机提速爬升工况</div>
-                        </div>
-                        <div class="review-option-card" id="opt-CONFIRMED_SHUTDOWN" onclick="selectReviewOption('CONFIRMED_SHUTDOWN')">
-                            <div class="review-option-title" style="color:#0d9488">🛑 确认现场停机</div>
-                            <div class="review-option-desc">机组正常脱网、刹车制动、自由惰行或跳闸停机工况</div>
                         </div>
                         <div class="review-option-card" id="opt-CONFIRMED_HARDWARE_FAULT" onclick="selectReviewOption('CONFIRMED_HARDWARE_FAULT')">
                             <div class="review-option-title" style="color:#9333ea">🟣 传感器/硬件故障</div>

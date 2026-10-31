@@ -138,9 +138,7 @@ RESULT_SUBDIRS = {
     "MAJORITY_COLLISION_ALARM": "02_多数表决碰撞_2票",
     "ISOLATED_DISTURBANCE_SAFE": "03_孤立扰动拦截_1票",
     "NORMAL_CLEAN_NOISE": "04_正常平稳底噪_0票",
-    "HARDWARE_CLIPPING_DISCARD": "05_硬件削顶死锁",
-    "MACHINE_STARTUP_SAFE": "06_现场机组启动工况",
-    "MACHINE_SHUTDOWN_SAFE": "07_现场机组停机工况"
+    "HARDWARE_CLIPPING_DISCARD": "05_硬件削顶死锁"
 }
 
 def archive_processed_file(src_path, consensus_level):
@@ -415,8 +413,8 @@ def sync_processed_files_to_history():
         "03_孤立扰动拦截_1票": {"consensus_level": "SHIELDED_ISOLATED_DISTURBANCE", "consensus_title": "扰动拦截", "consensus_badge": "badge-warning", "alarm_votes": 1, "is_alarm": False, "mean_confidence_pct": 33.0},
         "04_正常平稳底噪_0票": {"consensus_level": "NORMAL_CLEAN_NOISE", "consensus_title": "正常平稳", "consensus_badge": "badge-success", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
         "05_硬件削顶死锁": {"consensus_level": "HARDWARE_CLIPPING_DISCARD", "consensus_title": "幅值饱和", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
-        "06_现场机组启动工况": {"consensus_level": "MACHINE_STARTUP_SAFE", "consensus_title": "机组启动", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
-        "07_现场机组停机工况": {"consensus_level": "MACHINE_SHUTDOWN_SAFE", "consensus_title": "机组停机", "consensus_badge": "badge-secondary", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+        "06_现场机组启动工况": {"consensus_level": "NORMAL_CLEAN_NOISE", "consensus_title": "正常平稳", "consensus_badge": "badge-success", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
+        "07_现场机组停机工况": {"consensus_level": "NORMAL_CLEAN_NOISE", "consensus_title": "正常平稳", "consensus_badge": "badge-success", "alarm_votes": 0, "is_alarm": False, "mean_confidence_pct": 0.0},
     }
     
     if not os.path.exists(PROCESSED_DIR):
@@ -1218,24 +1216,6 @@ ANALYTICS_CATEGORIES = [
         "color": "#8b5cf6",
         "is_alarm": False,
         "is_safe": True
-    },
-    {
-        "key": "MACHINE_STARTUP_SAFE",
-        "name": "现场机组启动工况",
-        "short_name": "机组启动",
-        "badge": "badge-startup",
-        "color": "#06b6d4",
-        "is_alarm": False,
-        "is_safe": True
-    },
-    {
-        "key": "MACHINE_SHUTDOWN_SAFE",
-        "name": "现场机组停机工况",
-        "short_name": "机组停机",
-        "badge": "badge-shutdown",
-        "color": "#64748b",
-        "is_alarm": False,
-        "is_safe": True
     }
 ]
 
@@ -1243,10 +1223,6 @@ def classify_record_category(r):
     level = r.get("consensus_level")
     if level == "HARDWARE_CLIPPING_DISCARD" or r.get("is_clipped", False):
         return "HARDWARE_CLIPPING_DISCARD"
-    if level == "MACHINE_STARTUP_SAFE":
-        return "MACHINE_STARTUP_SAFE"
-    if level == "MACHINE_SHUTDOWN_SAFE":
-        return "MACHINE_SHUTDOWN_SAFE"
     if level == "CRITICAL_COLLISION_UNANIMOUS" or r.get("alarm_votes") == 3:
         return "CRITICAL_COLLISION_UNANIMOUS"
     if level == "MAJORITY_COLLISION_ALARM" or (r.get("alarm_votes") == 2 and r.get("is_alarm")):
@@ -1361,9 +1337,9 @@ def api_admin_analytics():
 
     normal_cnt = sum(1 for p in filtered if p["cat"] == "NORMAL_CLEAN_NOISE")
     clipped_cnt = sum(1 for p in filtered if p["cat"] == "HARDWARE_CLIPPING_DISCARD")
-    startup_cnt = sum(1 for p in filtered if p["cat"] == "MACHINE_STARTUP_SAFE")
-    shutdown_cnt = sum(1 for p in filtered if p["cat"] == "MACHINE_SHUTDOWN_SAFE")
-    safe_cnt = normal_cnt + startup_cnt + shutdown_cnt
+    startup_cnt = 0
+    shutdown_cnt = 0
+    safe_cnt = normal_cnt
 
     reviewed_cnt = sum(1 for p in filtered if p["record"].get("review", {}).get("status", "UNREVIEWED") != "UNREVIEWED")
     review_rate = round(reviewed_cnt / total_matched * 100, 2) if total_matched else 0.0
@@ -1385,8 +1361,8 @@ def api_admin_analytics():
         "shielded_rate_pct": shielded_rate,
         "normal_count": normal_cnt,
         "clipped_count": clipped_cnt,
-        "startup_count": startup_cnt,
-        "shutdown_count": shutdown_cnt,
+        "startup_count": 0,
+        "shutdown_count": 0,
         "safe_count": safe_cnt,
         "reviewed_count": reviewed_cnt,
         "review_rate_pct": review_rate,
@@ -1415,7 +1391,7 @@ def api_admin_analytics():
             "borderWidth": 1
         })
 
-    # 3. Chart 2: 7 大工况分类占比 (Types Doughnut)
+    # 3. Chart 2: 5 大核心工况分类占比 (Types Doughnut)
     type_counts = [sum(1 for p in filtered if p["cat"] == c_cfg["key"]) for c_cfg in ANALYTICS_CATEGORIES]
     type_pcts = [round(c / total_matched * 100, 2) if total_matched else 0.0 for c in type_counts]
     types_chart = {
@@ -1439,7 +1415,7 @@ def api_admin_analytics():
         cat = p["cat"]
         if cat in ["CRITICAL_COLLISION_UNANIMOUS", "MAJORITY_COLLISION_ALARM"]:
             hourly_alarms[idx] += 1
-        elif cat in ["ISOLATED_DISTURBANCE_SAFE", "HARDWARE_CLIPPING_DISCARD", "MACHINE_STARTUP_SAFE", "MACHINE_SHUTDOWN_SAFE"]:
+        elif cat in ["ISOLATED_DISTURBANCE_SAFE", "HARDWARE_CLIPPING_DISCARD"]:
             hourly_disturbances[idx] += 1
         else:
             hourly_normals[idx] += 1
@@ -1660,8 +1636,6 @@ def api_admin_analytics():
             takeaway = "门禁成功拦截，单模型偶发虚警无需停机"
         elif k == "HARDWARE_CLIPPING_DISCARD":
             takeaway = "传感器供电轨饱和截断，建议检修传感器线路"
-        elif k in ["MACHINE_STARTUP_SAFE", "MACHINE_SHUTDOWN_SAFE"]:
-            takeaway = "CPD 变点自适应匹配启停机过程，安全放行"
         else:
             takeaway = "基座平稳运行无冲击，背景底噪正常"
 

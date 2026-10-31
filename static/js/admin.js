@@ -1671,8 +1671,6 @@ function renderPhysicsChart(physicsPoints) {
             clippedGroup.push(pt);
         } else if (pt.cat === 'ISOLATED_DISTURBANCE_SAFE') {
             disturbanceGroup.push(pt);
-        } else if (pt.cat === 'MACHINE_STARTUP_SAFE' || pt.cat === 'MACHINE_SHUTDOWN_SAFE') {
-            stateGroup.push(pt);
         } else {
             normalGroup.push(pt);
         }

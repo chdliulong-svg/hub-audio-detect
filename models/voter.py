@@ -230,77 +230,7 @@ class TripleModelVoterEngine:
                 self._render_plot(x_norm, dur, result, output_dir)
             return result
 
-        # 第二道防线前置放行: 现场机组启动工况
-        if is_startup:
-            infer_duration = round((time.time() - t_start) * 1000.0, 1)
-            t_jump = step_rep.get("time_sec", 0.0)
-            ratio = step_rep.get("jump_ratio", 1.0)
-            result = {
-                "success": True,
-                "filename": fn,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "duration_sec": round(dur, 2),
-                "peak_amplitude": round(peak_val, 4),
-                "rms_amplitude": round(rms_val, 5),
-                "crest_factor": round(crest_val, 2),
-                "is_clipped": False,
-                "is_startup": True,
-                "is_shutdown": False,
-                "step_report": step_rep,
-                "rail_voltage": 0.0,
-                "clip_msg": step_rep.get("message", "现场机组启动工况"),
-                "scores": {"03K": 0.0, "03U": 0.0, "03R": 0.0},
-                "alarms": {"03K": 0, "03U": 0, "03R": 0},
-                "alarm_votes": 0,
-                "mean_confidence_pct": 0.0,
-                "consensus_level": "MACHINE_STARTUP_SAFE",
-                "consensus_title": f"【工况放行】现场机组启动工况 (跃迁点约 {t_jump:.2f}s, 爬升 {ratio:.1f}倍)",
-                "consensus_badge": "badge-startup",
-                "is_alarm": False,
-                "infer_ms": infer_duration,
-                "wav_file": wav_rel_path,
-                "plot_file": plot_rel_name
-            }
-            if generate_plot and output_dir:
-                self._render_plot(x_norm, dur, result, output_dir)
-            return result
-
-        # 第二道防线前置放行: 现场机组停机工况
-        if is_shutdown:
-            infer_duration = round((time.time() - t_start) * 1000.0, 1)
-            t_jump = step_rep.get("time_sec", 0.0)
-            ratio = step_rep.get("jump_ratio", 1.0)
-            result = {
-                "success": True,
-                "filename": fn,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "duration_sec": round(dur, 2),
-                "peak_amplitude": round(peak_val, 4),
-                "rms_amplitude": round(rms_val, 5),
-                "crest_factor": round(crest_val, 2),
-                "is_clipped": False,
-                "is_startup": False,
-                "is_shutdown": True,
-                "step_report": step_rep,
-                "rail_voltage": 0.0,
-                "clip_msg": step_rep.get("message", "现场机组停机工况"),
-                "scores": {"03K": 0.0, "03U": 0.0, "03R": 0.0},
-                "alarms": {"03K": 0, "03U": 0, "03R": 0},
-                "alarm_votes": 0,
-                "mean_confidence_pct": 0.0,
-                "consensus_level": "MACHINE_SHUTDOWN_SAFE",
-                "consensus_title": f"【工况放行】现场机组停机工况 (跃迁点约 {t_jump:.2f}s, 跌落 {ratio:.1f}倍)",
-                "consensus_badge": "badge-shutdown",
-                "is_alarm": False,
-                "infer_ms": infer_duration,
-                "wav_file": wav_rel_path,
-                "plot_file": plot_rel_name
-            }
-            if generate_plot and output_dir:
-                self._render_plot(x_norm, dur, result, output_dir)
-            return result
-
-        # 第三道防线前置放行: 由 common 检测出的极低能量底噪与稳态杂音快速放行 (RMS < min_rms_thresh)
+        # 第二道防线前置放行: 由 common 检测出的极低能量底噪与稳态杂音快速放行 (RMS < min_rms_thresh)
         if is_quiet or (self.min_rms_thresh > 0 and rms_val < self.min_rms_thresh):
             infer_duration = round((time.time() - t_start) * 1000.0, 1)
             result = {
@@ -433,10 +363,6 @@ class TripleModelVoterEngine:
         # 颜色区分
         if res.get("is_clipped"):
             accent = "#f43f5e"
-        elif res.get("consensus_level") == "MACHINE_STARTUP_SAFE":
-            accent = "#0284c7"  # 现场启动: 深天蓝
-        elif res.get("consensus_level") == "MACHINE_SHUTDOWN_SAFE":
-            accent = "#0d9488"  # 现场停机: 青绿
         elif res.get("alarm_votes") == 3:
             accent = "#ef4444"
         elif res.get("alarm_votes") == 2:
@@ -447,15 +373,6 @@ class TripleModelVoterEngine:
             accent = "#10b981"
             
         ax_wave.plot(t, audio, color=accent, linewidth=0.6, alpha=0.95)
-        
-        # 标注启停跃迁时刻线
-        step_rep = res.get("step_report", {})
-        if step_rep and step_rep.get("detected", False):
-            t_event = float(step_rep.get("time_sec", 0.0))
-            stype = "机组启动" if step_rep.get("type") == "STARTUP_STEP_UP" else "机组停机"
-            ax_wave.axvline(x=t_event, color=accent, linestyle=":", linewidth=1.2, alpha=0.9)
-            ax_wave.text(t_event + 0.1, 0.70, f"★ {stype}: {t_event:.2f}s", color=accent, fontsize=7.5, fontweight='bold')
-            ax_spec.axvline(x=t_event, color="#ffffff", linestyle="--", linewidth=1.0, alpha=0.75)
             
         ax_wave.set_xlim(0, dur)
         ax_wave.set_ylim(-1.05, 1.05)

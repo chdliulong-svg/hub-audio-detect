@@ -658,40 +658,29 @@ def preprocess_audio_for_model(file_path_or_audio, target_sr: int = 10000, min_r
     clip_report = detect_clipping_level(audio, sr=orig_sr)
     should_discard = bool(clip_report["should_discard"])
 
-    # 2. 工业双向阶跃变点检测 (识别现场启动与现场停机)
+    # 2. 停机/启动工况识别已按需求彻底移除，避免风速阵风或工况波动误判
     is_startup = False
     is_shutdown = False
     step_report = {"detected": False, "type": "NONE"}
-    if not should_discard:
-        step_report = detect_step_change_point(audio, sr=orig_sr)
-        if step_report.get("detected", False):
-            if step_report.get("type") == "STARTUP_STEP_UP":
-                is_startup = True
-            elif step_report.get("type") == "SHUTDOWN_STEP_DOWN":
-                is_shutdown = True
 
     # 3. 极低能量底噪与稳态杂音前置快速旁路检测 (含 RMS < min_rms_threshold)
-    if not should_discard and not is_startup and not is_shutdown:
+    if not should_discard:
         is_quiet_normal, quiet_msg = detect_quiet_or_steady_noise(
             audio, sr=orig_sr, min_rms_thresh=min_rms_threshold
         )
     else:
-        is_quiet_normal, quiet_msg = False, "已检出硬件削顶或启停机工况"
+        is_quiet_normal, quiet_msg = False, "已检出硬件持续削顶死锁"
 
     # 记录判别信息与向下兼容字段
     clip_report["is_persistent_clipping"] = should_discard
     clip_report["is_quiet_normal"] = is_quiet_normal
     clip_report["quiet_message"] = quiet_msg
-    clip_report["is_startup"] = is_startup
-    clip_report["is_shutdown"] = is_shutdown
+    clip_report["is_startup"] = False
+    clip_report["is_shutdown"] = False
     clip_report["step_report"] = step_report
 
     if should_discard:
         clip_report["decision"] = "DISCARD"
-    elif is_startup:
-        clip_report["decision"] = "MACHINE_STARTUP"
-    elif is_shutdown:
-        clip_report["decision"] = "MACHINE_SHUTDOWN"
     elif is_quiet_normal:
         clip_report["decision"] = "QUIET_NORMAL"
     else:
