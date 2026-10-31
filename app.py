@@ -28,6 +28,10 @@ from flask import Flask, request, jsonify, render_template, send_from_directory,
 
 # 当在后台静默运行或控制台脱离时，提供防崩溃安全日志流
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(APP_DIR)
+for p in [APP_DIR, ROOT_DIR]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 log_dir = os.path.join(APP_DIR, "records")
 os.makedirs(log_dir, exist_ok=True)
 daemon_log_path = os.path.join(log_dir, "daemon_console.log")
